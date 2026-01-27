@@ -1,0 +1,145 @@
+name: CI
+
+# NOTE: This package uses atomix which requires the intrinsics-optimized
+# Go compiler (github.com/hayabusa-cloud/go, branch: atomix) for optimal
+# performance. Standard Go compiler is used here for fast CI feedback.
+# See benchmark-intrinsics job for performance validation.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      run_intrinsics_benchmark:
+        description: 'Run benchmark with intrinsics compiler'
+        required: false
+        default: 'false'
+        type: boolean
+
+jobs:
+  test:
+    name: test (${{ matrix.name }})
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Go 1.25 (minimum required version)
+          - name: linux/amd64 (go1.25)
+            runs-on: ubuntu-latest
+            go-version: '1.25'
+          - name: darwin/arm64 (go1.25)
+            runs-on: macos-latest
+            go-version: '1.25'
+          # Latest stable Go
+          - name: linux/amd64 (stable)
+            runs-on: ubuntu-latest
+            go-version: 'stable'
+          - name: darwin/arm64 (stable)
+            runs-on: macos-latest
+            go-version: 'stable'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+
+      - name: Verify dependencies
+        run: go mod verify
+
+      - name: Verify go.mod is tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Check formatting
+        shell: bash
+        run: |
+          if [ -n "$(gofmt -l .)" ]; then
+            echo "Files not formatted:"
+            gofmt -l .
+            exit 1
+          fi
+
+      - name: Run tests with race detector
+        run: go test -race ./...
+
+      - name: Run tests with coverage
+        run: go test -covermode=atomic -coverprofile=coverage.out ./...
+
+      - name: Upload coverage to Codecov
+        if: matrix.name == 'linux/amd64 (stable)'
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage.out
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
+  cross-build:
+    name: cross-build (compile-only)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: linux
+            goarch: riscv64
+          - goos: linux
+            goarch: loong64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Cross-build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: go build ./...
+
+  # Benchmark with intrinsics compiler (manual trigger or releases)
+  benchmark-intrinsics:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.run_intrinsics_benchmark == 'true' || github.event_name == 'release' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache intrinsics compiler
+        id: cache-intrinsics
+        uses: actions/cache@v4
+        with:
+          path: ~/go-intrinsics
+          key: go-intrinsics-atomix-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
+
+      - name: Build intrinsics compiler
+        if: steps.cache-intrinsics.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch atomix https://github.com/hayabusa-cloud/go.git ~/go-intrinsics-src
+          cd ~/go-intrinsics-src/src
+          ./make.bash
+          mv ~/go-intrinsics-src ~/go-intrinsics
+
+      - name: Run benchmarks with intrinsics
+        env:
+          GOROOT: ~/go-intrinsics
+          PATH: ~/go-intrinsics/bin:$PATH
+        run: |
+          go version
+          go test -bench=. -benchmem ./...
