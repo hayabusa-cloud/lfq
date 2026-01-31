@@ -37,15 +37,27 @@ go get code.hybscloud.com/lfq
 Pour de meilleures performances, compilez avec le [compilateur Go optimisé avec intrinsèques](https://github.com/hayabusa-cloud/go) :
 
 ```bash
-# Cloner et compiler le compilateur d'intrinsèques
-git clone -b atomix https://github.com/hayabusa-cloud/go ~/go-atomix
-cd ~/go-atomix/src && ./make.bash
+# Utilisation du Makefile (recommandé)
+make install-compiler   # Télécharger la version pré-compilée (~30 secondes)
+make build              # Compiler avec le compilateur d'intrinsèques
+make test               # Tester avec le compilateur d'intrinsèques
 
-# Utiliser pour compiler le code dépendant de lfq
-~/go-atomix/bin/go build ./...
+# Ou compiler depuis les sources (dernière version de développement)
+make install-compiler-source
 ```
 
-Le compilateur d'intrinsèques intègre les opérations atomix en instructions CPU uniques, assurant la sémantique correcte d'ordonnancement mémoire. Le compilateur Go standard fonctionne pour les tests de base mais peut présenter des problèmes sous haute contention.
+Installation manuelle :
+
+```bash
+# Version pré-compilée (recommandée)
+curl -fsSL https://github.com/hayabusa-cloud/go/releases/latest/download/go1.25.6.linux-amd64.tar.gz | tar -xz -C ~/sdk
+mv ~/sdk/go ~/sdk/go-atomix
+
+# Utiliser pour compiler le code dépendant de lfq
+GOROOT=~/sdk/go-atomix ~/sdk/go-atomix/bin/go build ./...
+```
+
+Le compilateur d'intrinsèques intègre les opérations atomix avec l'ordonnancement mémoire correct. Le compilateur Go standard fonctionne pour les tests de base mais peut présenter des problèmes sous haute contention.
 
 ## Types de Files
 

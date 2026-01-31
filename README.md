@@ -37,12 +37,24 @@ go get code.hybscloud.com/lfq
 For better performance, compile with the [intrinsics-optimized Go compiler](https://github.com/hayabusa-cloud/go):
 
 ```bash
-# Clone and build the intrinsics compiler
-git clone -b atomix https://github.com/hayabusa-cloud/go ~/go-atomix
-cd ~/go-atomix/src && ./make.bash
+# Using Makefile (recommended)
+make install-compiler   # Download pre-built release (~30 seconds)
+make build              # Build with intrinsics compiler
+make test               # Test with intrinsics compiler
+
+# Or build compiler from source (bleeding-edge)
+make install-compiler-source
+```
+
+Manual installation:
+
+```bash
+# Pre-built release (recommended)
+curl -fsSL https://github.com/hayabusa-cloud/go/releases/latest/download/go1.25.6.linux-amd64.tar.gz | tar -xz -C ~/sdk
+mv ~/sdk/go ~/sdk/go-atomix
 
 # Use for building lfq-dependent code
-~/go-atomix/bin/go build ./...
+GOROOT=~/sdk/go-atomix ~/sdk/go-atomix/bin/go build ./...
 ```
 
 The intrinsics compiler inlines `atomix` operations with proper memory ordering. The standard Go compiler works for basic testing but may exhibit issues under high contention.
