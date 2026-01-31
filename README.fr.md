@@ -286,6 +286,32 @@ func EnqueueWithRetry(q lfq.Queue[Item], item Item, maxRetries int) bool {
 
 ```
 
+### Arrêt Gracieux
+
+Les files basées sur FAA (MPMC, SPMC, MPSC) incluent un mécanisme de seuil pour prévenir le livelock. Pour un arrêt gracieux où les producteurs terminent avant les consommateurs, utilisez l'interface `Drainer` :
+
+```go
+// Les goroutines productrices terminent
+prodWg.Wait()
+
+// Signaler qu'il n'y aura plus d'enqueues
+if d, ok := q.(lfq.Drainer); ok {
+    d.Drain()
+}
+
+// Les consommateurs peuvent maintenant drainer tous les éléments
+// restants sans blocage par seuil
+for {
+    item, err := q.Dequeue()
+    if err != nil {
+        break // La file est vide
+    }
+    process(item)
+}
+```
+
+`Drain()` est un indice — l'appelant doit s'assurer qu'aucun autre appel à `Enqueue()` ne sera fait. Les files SPSC n'implémentent pas `Drainer` car elles n'ont pas de mécanisme de seuil ; l'assertion de type gère ce cas naturellement.
+
 ## Quand Utiliser Quelle File
 
 ```
