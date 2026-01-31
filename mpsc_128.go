@@ -25,6 +25,8 @@ type MPSCIndirect struct {
 	_        pad
 	tail     atomix.Uint64 // Producer index (FAA)
 	_        pad
+	draining atomix.Bool // Drain mode: no more enqueues
+	_        pad
 	buffer   []mpmc128Slot
 	capacity uint64
 	size     uint64
@@ -58,6 +60,13 @@ func NewMPSCIndirect(capacity int) *MPSCIndirect {
 	return q
 }
 
+// Drain signals that no more enqueues will occur.
+// This is a hint for graceful shutdown — the caller ensures no further
+// enqueues will be attempted after calling Drain.
+func (q *MPSCIndirect) Drain() {
+	q.draining.StoreRelease(true)
+}
+
 // Enqueue adds an element to the queue (multiple producers safe).
 // Returns ErrWouldBlock if the queue is full.
 func (q *MPSCIndirect) Enqueue(elem uintptr) error {
@@ -87,9 +96,7 @@ func (q *MPSCIndirect) Enqueue(elem uintptr) error {
 		}
 
 		if int64(slotCycle) < int64(expectedCycle) {
-			// SCQ slot repair: advance stale slot so dequeue can skip this position
-			slot.entry.CompareAndSwapAcqRel(slotCycle, valHi, expectedCycle+1, valHi)
-			return ErrWouldBlock
+			return ErrWouldBlock // Queue full
 		}
 
 		// slotCycle > expectedCycle or CAS failed: another producer used this slot
@@ -135,6 +142,8 @@ type MPSCPtr struct {
 	_        pad
 	tail     atomix.Uint64 // Producer index (FAA)
 	_        pad
+	draining atomix.Bool // Drain mode: no more enqueues
+	_        pad
 	buffer   []mpmc128Slot
 	capacity uint64
 	size     uint64
@@ -165,6 +174,13 @@ func NewMPSCPtr(capacity int) *MPSCPtr {
 	return q
 }
 
+// Drain signals that no more enqueues will occur.
+// This is a hint for graceful shutdown — the caller ensures no further
+// enqueues will be attempted after calling Drain.
+func (q *MPSCPtr) Drain() {
+	q.draining.StoreRelease(true)
+}
+
 // Enqueue adds an element to the queue (multiple producers safe).
 // Returns ErrWouldBlock if the queue is full.
 func (q *MPSCPtr) Enqueue(elem unsafe.Pointer) error {
@@ -190,9 +206,7 @@ func (q *MPSCPtr) Enqueue(elem unsafe.Pointer) error {
 		}
 
 		if int64(slotCycle) < int64(expectedCycle) {
-			// SCQ slot repair: advance stale slot so dequeue can skip this position
-			slot.entry.CompareAndSwapAcqRel(slotCycle, valHi, expectedCycle+1, valHi)
-			return ErrWouldBlock
+			return ErrWouldBlock // Queue full
 		}
 		sw.Once()
 	}

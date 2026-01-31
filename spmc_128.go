@@ -27,6 +27,8 @@ type SPMCIndirect struct {
 	_         pad
 	threshold atomix.Int64 // Livelock prevention
 	_         pad
+	draining  atomix.Bool // Drain mode: skip threshold check
+	_         pad
 	buffer    []mpmc128Slot
 	capacity  uint64
 	size      uint64
@@ -60,6 +62,13 @@ func NewSPMCIndirect(capacity int) *SPMCIndirect {
 	}
 
 	return q
+}
+
+// Drain signals that no more enqueues will occur.
+// After Drain is called, Dequeue skips the threshold check to allow
+// consumers to drain all remaining items without producer pressure.
+func (q *SPMCIndirect) Drain() {
+	q.draining.StoreRelease(true)
 }
 
 // Enqueue adds an element to the queue (single producer only).
@@ -96,7 +105,8 @@ func (q *SPMCIndirect) Enqueue(elem uintptr) error {
 // Returns (0, ErrWouldBlock) if the queue is empty.
 func (q *SPMCIndirect) Dequeue() (uintptr, error) {
 	// Early exit via threshold (livelock prevention)
-	if q.threshold.LoadRelaxed() < 0 {
+	// Skip threshold check in drain mode
+	if !q.draining.LoadAcquire() && q.threshold.LoadRelaxed() < 0 {
 		return 0, ErrWouldBlock
 	}
 
@@ -133,7 +143,7 @@ func (q *SPMCIndirect) Dequeue() (uintptr, error) {
 				return 0, ErrWouldBlock
 			}
 			// Decrement threshold for livelock prevention
-			if q.threshold.AddAcqRel(-1) <= 0 {
+			if q.threshold.AddAcqRel(-1) <= 0 && !q.draining.LoadAcquire() {
 				return 0, ErrWouldBlock
 			}
 		}
@@ -172,6 +182,8 @@ type SPMCPtr struct {
 	_         pad
 	threshold atomix.Int64 // Livelock prevention
 	_         pad
+	draining  atomix.Bool // Drain mode: skip threshold check
+	_         pad
 	buffer    []mpmc128Slot
 	capacity  uint64
 	size      uint64
@@ -204,6 +216,13 @@ func NewSPMCPtr(capacity int) *SPMCPtr {
 	return q
 }
 
+// Drain signals that no more enqueues will occur.
+// After Drain is called, Dequeue skips the threshold check to allow
+// consumers to drain all remaining items without producer pressure.
+func (q *SPMCPtr) Drain() {
+	q.draining.StoreRelease(true)
+}
+
 // Enqueue adds an element to the queue (single producer only).
 // Returns ErrWouldBlock if the queue is full.
 func (q *SPMCPtr) Enqueue(elem unsafe.Pointer) error {
@@ -234,7 +253,9 @@ func (q *SPMCPtr) Enqueue(elem unsafe.Pointer) error {
 // Dequeue removes and returns an element (multiple consumers safe).
 // Returns (nil, ErrWouldBlock) if the queue is empty.
 func (q *SPMCPtr) Dequeue() (unsafe.Pointer, error) {
-	if q.threshold.LoadRelaxed() < 0 {
+	// Early exit via threshold (livelock prevention)
+	// Skip threshold check in drain mode
+	if !q.draining.LoadAcquire() && q.threshold.LoadRelaxed() < 0 {
 		return nil, ErrWouldBlock
 	}
 
@@ -264,7 +285,7 @@ func (q *SPMCPtr) Dequeue() (unsafe.Pointer, error) {
 				q.threshold.AddAcqRel(-1)
 				return nil, ErrWouldBlock
 			}
-			if q.threshold.AddAcqRel(-1) <= 0 {
+			if q.threshold.AddAcqRel(-1) <= 0 && !q.draining.LoadAcquire() {
 				return nil, ErrWouldBlock
 			}
 		}

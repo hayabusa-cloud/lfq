@@ -28,6 +28,8 @@ type MPMCIndirect struct {
 	_         pad
 	threshold atomix.Int64 // Livelock prevention
 	_         pad
+	draining  atomix.Bool // Drain mode: skip threshold check
+	_         pad
 	buffer    []mpmc128Slot
 	capacity  uint64 // n (usable capacity)
 	size      uint64 // 2n (physical slots)
@@ -66,6 +68,13 @@ func NewMPMCIndirect(capacity int) *MPMCIndirect {
 	return q
 }
 
+// Drain signals that no more enqueues will occur.
+// After Drain is called, Dequeue skips the threshold check to allow
+// consumers to drain all remaining items without producer pressure.
+func (q *MPMCIndirect) Drain() {
+	q.draining.StoreRelease(true)
+}
+
 // Enqueue adds an element to the queue.
 // Returns ErrWouldBlock if the queue is full.
 func (q *MPMCIndirect) Enqueue(elem uintptr) error {
@@ -92,9 +101,7 @@ func (q *MPMCIndirect) Enqueue(elem uintptr) error {
 		}
 
 		if int64(slotCycle) < int64(expectedCycle) {
-			// SCQ slot repair: advance stale slot so dequeue can skip this position
-			slot.entry.CompareAndSwapAcqRel(slotCycle, valHi, expectedCycle+1, valHi)
-			return ErrWouldBlock
+			return ErrWouldBlock // Queue full
 		}
 
 		sw.Once()
@@ -104,7 +111,9 @@ func (q *MPMCIndirect) Enqueue(elem uintptr) error {
 // Dequeue removes and returns an element from the queue.
 // Returns (0, ErrWouldBlock) if the queue is empty.
 func (q *MPMCIndirect) Dequeue() (uintptr, error) {
-	if q.threshold.LoadRelaxed() < 0 {
+	// Early exit via threshold (livelock prevention)
+	// Skip threshold check in drain mode
+	if !q.draining.LoadAcquire() && q.threshold.LoadRelaxed() < 0 {
 		return 0, ErrWouldBlock
 	}
 
@@ -134,7 +143,7 @@ func (q *MPMCIndirect) Dequeue() (uintptr, error) {
 				q.threshold.AddAcqRel(-1)
 				return 0, ErrWouldBlock
 			}
-			if q.threshold.AddAcqRel(-1) <= 0 {
+			if q.threshold.AddAcqRel(-1) <= 0 && !q.draining.LoadAcquire() {
 				return 0, ErrWouldBlock
 			}
 		}
@@ -174,6 +183,8 @@ type MPMCPtr struct {
 	_         pad
 	threshold atomix.Int64 // Livelock prevention
 	_         pad
+	draining  atomix.Bool // Drain mode: skip threshold check
+	_         pad
 	buffer    []mpmc128Slot // Reuse same slot type
 	capacity  uint64        // n (usable capacity)
 	size      uint64        // 2n (physical slots)
@@ -207,6 +218,13 @@ func NewMPMCPtr(capacity int) *MPMCPtr {
 	return q
 }
 
+// Drain signals that no more enqueues will occur.
+// After Drain is called, Dequeue skips the threshold check to allow
+// consumers to drain all remaining items without producer pressure.
+func (q *MPMCPtr) Drain() {
+	q.draining.StoreRelease(true)
+}
+
 // Enqueue adds an element to the queue.
 // Returns ErrWouldBlock if the queue is full.
 func (q *MPMCPtr) Enqueue(elem unsafe.Pointer) error {
@@ -233,9 +251,7 @@ func (q *MPMCPtr) Enqueue(elem unsafe.Pointer) error {
 		}
 
 		if int64(slotCycle) < int64(expectedCycle) {
-			// SCQ slot repair: advance stale slot so dequeue can skip this position
-			slot.entry.CompareAndSwapAcqRel(slotCycle, valHi, expectedCycle+1, valHi)
-			return ErrWouldBlock
+			return ErrWouldBlock // Queue full
 		}
 
 		sw.Once()
@@ -245,7 +261,9 @@ func (q *MPMCPtr) Enqueue(elem unsafe.Pointer) error {
 // Dequeue removes and returns an element from the queue.
 // Returns (nil, ErrWouldBlock) if the queue is empty.
 func (q *MPMCPtr) Dequeue() (unsafe.Pointer, error) {
-	if q.threshold.LoadRelaxed() < 0 {
+	// Early exit via threshold (livelock prevention)
+	// Skip threshold check in drain mode
+	if !q.draining.LoadAcquire() && q.threshold.LoadRelaxed() < 0 {
 		return nil, ErrWouldBlock
 	}
 
@@ -275,7 +293,7 @@ func (q *MPMCPtr) Dequeue() (unsafe.Pointer, error) {
 				q.threshold.AddAcqRel(-1)
 				return nil, ErrWouldBlock
 			}
-			if q.threshold.AddAcqRel(-1) <= 0 {
+			if q.threshold.AddAcqRel(-1) <= 0 && !q.draining.LoadAcquire() {
 				return nil, ErrWouldBlock
 			}
 		}
