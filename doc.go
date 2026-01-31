@@ -82,7 +82,7 @@
 //	q := lfq.NewMPSC[Event](4096)
 //
 //	// Multiple producers (event sources)
-//	for sensor := range slices.Value(sensors) {
+//	for sensor := range slices.Values(sensors) {
 //	    go func(s Sensor) {
 //	        for ev := range s.Events() {
 //	            q.Enqueue(&ev)
@@ -270,6 +270,7 @@
 // Length is intentionally not provided because accurate counts in lock-free
 // algorithms require expensive cross-core synchronization. Track counts in
 // application logic when needed.
+//
 // # Thread Safety
 //
 // All queue operations are thread-safe within their access pattern constraints:
