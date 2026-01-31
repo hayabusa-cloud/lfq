@@ -37,15 +37,27 @@ go get code.hybscloud.com/lfq
 为获得更好的性能，请使用[内部函数优化 Go 编译器](https://github.com/hayabusa-cloud/go)编译：
 
 ```bash
-# 克隆并构建内部函数编译器
-git clone -b atomix https://github.com/hayabusa-cloud/go ~/go-atomix
-cd ~/go-atomix/src && ./make.bash
+# 使用 Makefile（推荐）
+make install-compiler   # 下载预构建版本（约 30 秒）
+make build              # 使用内部函数编译器构建
+make test               # 使用内部函数编译器测试
 
-# 用于编译依赖 lfq 的代码
-~/go-atomix/bin/go build ./...
+# 或从源代码构建编译器（最新开发版）
+make install-compiler-source
 ```
 
-内部函数编译器将 atomix 操作编译为单条 CPU 指令，确保正确的内存顺序语义。标准 Go 编译器可用于基本测试，但在高争用情况下可能出现问题。
+手动安装：
+
+```bash
+# 预构建版本（推荐）
+curl -fsSL https://github.com/hayabusa-cloud/go/releases/latest/download/go1.25.6.linux-amd64.tar.gz | tar -xz -C ~/sdk
+mv ~/sdk/go ~/sdk/go-atomix
+
+# 用于编译依赖 lfq 的代码
+GOROOT=~/sdk/go-atomix ~/sdk/go-atomix/bin/go build ./...
+```
+
+内部函数编译器将 atomix 操作内联为正确内存顺序的指令。标准 Go 编译器可用于基本测试，但在高争用情况下可能出现问题。
 
 ## 队列类型
 

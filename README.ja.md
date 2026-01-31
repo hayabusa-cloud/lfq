@@ -37,15 +37,27 @@ go get code.hybscloud.com/lfq
 より高いパフォーマンスを得るには、[内部関数最適化 Go コンパイラ](https://github.com/hayabusa-cloud/go)でコンパイルしてください：
 
 ```bash
-# 内部関数コンパイラをクローンしてビルド
-git clone -b atomix https://github.com/hayabusa-cloud/go ~/go-atomix
-cd ~/go-atomix/src && ./make.bash
+# Makefile を使用（推奨）
+make install-compiler   # ビルド済みリリースをダウンロード（約 30 秒）
+make build              # 内部関数コンパイラでビルド
+make test               # 内部関数コンパイラでテスト
 
-# lfq 依存コードのビルドに使用
-~/go-atomix/bin/go build ./...
+# またはソースからコンパイラをビルド（最新開発版）
+make install-compiler-source
 ```
 
-内部関数コンパイラは atomix 操作を単一 CPU 命令にインライン化し、正しいメモリオーダリングセマンティクスを保証します。標準 Go コンパイラは基本的なテストには使用できますが、高競合下では問題が発生する可能性があります。
+手動インストール：
+
+```bash
+# ビルド済みリリース（推奨）
+curl -fsSL https://github.com/hayabusa-cloud/go/releases/latest/download/go1.25.6.linux-amd64.tar.gz | tar -xz -C ~/sdk
+mv ~/sdk/go ~/sdk/go-atomix
+
+# lfq 依存コードのビルドに使用
+GOROOT=~/sdk/go-atomix ~/sdk/go-atomix/bin/go build ./...
+```
+
+内部関数コンパイラは atomix 操作を適切なメモリオーダリングでインライン化します。標準 Go コンパイラは基本的なテストには使用できますが、高競合下では問題が発生する可能性があります。
 
 ## キュータイプ
 

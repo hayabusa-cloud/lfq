@@ -37,15 +37,27 @@ go get code.hybscloud.com/lfq
 Para un mejor rendimiento, compile con el [compilador Go optimizado con intrínsecos](https://github.com/hayabusa-cloud/go):
 
 ```bash
-# Clonar y compilar el compilador de intrínsecos
-git clone -b atomix https://github.com/hayabusa-cloud/go ~/go-atomix
-cd ~/go-atomix/src && ./make.bash
+# Usando Makefile (recomendado)
+make install-compiler   # Descargar versión pre-compilada (~30 segundos)
+make build              # Compilar con el compilador de intrínsecos
+make test               # Probar con el compilador de intrínsecos
 
-# Usar para compilar código dependiente de lfq
-~/go-atomix/bin/go build ./...
+# O compilar desde código fuente (última versión de desarrollo)
+make install-compiler-source
 ```
 
-El compilador de intrínsecos incorpora las operaciones de atomix en instrucciones CPU individuales, asegurando la semántica correcta de ordenamiento de memoria. El compilador Go estándar funciona para pruebas básicas pero puede presentar problemas bajo alta contención.
+Instalación manual:
+
+```bash
+# Versión pre-compilada (recomendada)
+curl -fsSL https://github.com/hayabusa-cloud/go/releases/latest/download/go1.25.6.linux-amd64.tar.gz | tar -xz -C ~/sdk
+mv ~/sdk/go ~/sdk/go-atomix
+
+# Usar para compilar código dependiente de lfq
+GOROOT=~/sdk/go-atomix ~/sdk/go-atomix/bin/go build ./...
+```
+
+El compilador de intrínsecos incorpora las operaciones de atomix con el ordenamiento de memoria correcto. El compilador Go estándar funciona para pruebas básicas pero puede presentar problemas bajo alta contención.
 
 ## Tipos de Cola
 
