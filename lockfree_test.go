@@ -16,6 +16,7 @@
 package lfq_test
 
 import (
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -2380,5 +2381,580 @@ func TestDrainThresholdExhaustion(t *testing.T) {
 				t.Errorf("Dequeue %d failed after Drain: %v", i, err)
 			}
 		}
+	})
+}
+
+// TestDrainWithThresholdExhausted exercises the threshold<=0 && draining=true
+// branch in Dequeue. When draining is active, consumers must continue looping
+// past the threshold check instead of returning ErrWouldBlock.
+//
+// Setup: many consumers race on a partially-filled queue, driving threshold
+// negative. Then Drain() is called, allowing consumers to retrieve remaining
+// items despite exhausted threshold.
+func TestDrainWithThresholdExhausted(t *testing.T) {
+	if lfq.RaceEnabled {
+		t.Skip("skip: lock-free algorithm uses cross-variable memory ordering")
+	}
+
+	const (
+		cap         = 4
+		numItems    = 3 // Partially fill (less than capacity)
+		numConsumer = 8 // Many consumers to exhaust threshold quickly
+	)
+
+	// MPMC — concurrent producers + consumers for threshold exhaustion with tail ahead.
+	// Phase 1: producers and consumers race (covers threshold<=0 && !draining).
+	// Phase 2: drain mode (covers threshold<=0 && draining=true bypass).
+	t.Run("MPMC", func(t *testing.T) {
+		const (
+			mpmcCap         = 2
+			mpmcNumProducer = 4
+			mpmcNumConsumer = 16
+		)
+		prev := runtime.GOMAXPROCS(mpmcNumProducer + mpmcNumConsumer + 2)
+		defer runtime.GOMAXPROCS(prev)
+
+		q := lfq.NewMPMC[int](mpmcCap)
+		var producerStop, consumerStop atomix.Bool
+		var totalEnqueued, totalDequeued atomix.Int64
+		var wg sync.WaitGroup
+
+		wg.Add(mpmcNumProducer)
+		for range mpmcNumProducer {
+			go func() {
+				defer wg.Done()
+				v := 1
+				for !producerStop.LoadAcquire() {
+					if q.Enqueue(&v) == nil {
+						totalEnqueued.Add(1)
+					}
+				}
+			}()
+		}
+
+		wg.Add(mpmcNumConsumer)
+		for range mpmcNumConsumer {
+			go func() {
+				defer wg.Done()
+				for !consumerStop.LoadAcquire() {
+					if _, err := q.Dequeue(); err == nil {
+						totalDequeued.Add(1)
+					}
+				}
+			}()
+		}
+
+		// Phase 1: concurrent operation — threshold exhaustion with !draining
+		time.Sleep(100 * time.Millisecond)
+
+		// Phase 2: stop producers, enable drain
+		producerStop.StoreRelease(true)
+		q.Drain()
+
+		// Phase 3: consumers drain remaining with draining=true
+		time.Sleep(50 * time.Millisecond)
+		consumerStop.StoreRelease(true)
+		wg.Wait()
+
+		if totalDequeued.Load() > totalEnqueued.Load() {
+			t.Fatalf("dequeued %d > enqueued %d", totalDequeued.Load(), totalEnqueued.Load())
+		}
+		t.Logf("MPMC drain+threshold: enqueued=%d dequeued=%d", totalEnqueued.Load(), totalDequeued.Load())
+	})
+
+	// MPMCIndirect
+	t.Run("MPMCIndirect", func(t *testing.T) {
+		const (
+			mpmcCap         = 2
+			mpmcNumProducer = 4
+			mpmcNumConsumer = 16
+		)
+		prev := runtime.GOMAXPROCS(mpmcNumProducer + mpmcNumConsumer + 2)
+		defer runtime.GOMAXPROCS(prev)
+
+		q := lfq.NewMPMCIndirect(mpmcCap)
+		var producerStop, consumerStop atomix.Bool
+		var totalEnqueued, totalDequeued atomix.Int64
+		var wg sync.WaitGroup
+
+		wg.Add(mpmcNumProducer)
+		for range mpmcNumProducer {
+			go func() {
+				defer wg.Done()
+				for !producerStop.LoadAcquire() {
+					if q.Enqueue(1) == nil {
+						totalEnqueued.Add(1)
+					}
+				}
+			}()
+		}
+
+		wg.Add(mpmcNumConsumer)
+		for range mpmcNumConsumer {
+			go func() {
+				defer wg.Done()
+				for !consumerStop.LoadAcquire() {
+					if _, err := q.Dequeue(); err == nil {
+						totalDequeued.Add(1)
+					}
+				}
+			}()
+		}
+
+		time.Sleep(100 * time.Millisecond)
+		producerStop.StoreRelease(true)
+		q.Drain()
+		time.Sleep(50 * time.Millisecond)
+		consumerStop.StoreRelease(true)
+		wg.Wait()
+
+		if totalDequeued.Load() > totalEnqueued.Load() {
+			t.Fatalf("dequeued %d > enqueued %d", totalDequeued.Load(), totalEnqueued.Load())
+		}
+		t.Logf("MPMCIndirect drain+threshold: enqueued=%d dequeued=%d", totalEnqueued.Load(), totalDequeued.Load())
+	})
+
+	// MPMCPtr
+	t.Run("MPMCPtr", func(t *testing.T) {
+		const (
+			mpmcCap         = 2
+			mpmcNumProducer = 4
+			mpmcNumConsumer = 16
+		)
+		prev := runtime.GOMAXPROCS(mpmcNumProducer + mpmcNumConsumer + 2)
+		defer runtime.GOMAXPROCS(prev)
+
+		q := lfq.NewMPMCPtr(mpmcCap)
+		sentinel := 42
+		var producerStop, consumerStop atomix.Bool
+		var totalEnqueued, totalDequeued atomix.Int64
+		var wg sync.WaitGroup
+
+		wg.Add(mpmcNumProducer)
+		for range mpmcNumProducer {
+			go func() {
+				defer wg.Done()
+				for !producerStop.LoadAcquire() {
+					if q.Enqueue(unsafe.Pointer(&sentinel)) == nil {
+						totalEnqueued.Add(1)
+					}
+				}
+			}()
+		}
+
+		wg.Add(mpmcNumConsumer)
+		for range mpmcNumConsumer {
+			go func() {
+				defer wg.Done()
+				for !consumerStop.LoadAcquire() {
+					if _, err := q.Dequeue(); err == nil {
+						totalDequeued.Add(1)
+					}
+				}
+			}()
+		}
+
+		time.Sleep(100 * time.Millisecond)
+		producerStop.StoreRelease(true)
+		q.Drain()
+		time.Sleep(50 * time.Millisecond)
+		consumerStop.StoreRelease(true)
+		wg.Wait()
+
+		if totalDequeued.Load() > totalEnqueued.Load() {
+			t.Fatalf("dequeued %d > enqueued %d", totalDequeued.Load(), totalEnqueued.Load())
+		}
+		t.Logf("MPMCPtr drain+threshold: enqueued=%d dequeued=%d", totalEnqueued.Load(), totalDequeued.Load())
+	})
+
+	// SPMC
+	t.Run("SPMC", func(t *testing.T) {
+		q := lfq.NewSPMC[int](cap)
+		values := make([]int, numItems)
+		for i := range numItems {
+			values[i] = i + 1
+			if err := q.Enqueue(&values[i]); err != nil {
+				t.Fatalf("Enqueue(%d): %v", i, err)
+			}
+		}
+
+		var totalDequeued atomix.Int64
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+
+		for range numConsumer {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				for range 50 {
+					if _, err := q.Dequeue(); err == nil {
+						totalDequeued.Add(1)
+					}
+				}
+			}()
+		}
+
+		close(start)
+		time.Sleep(time.Millisecond)
+		q.Drain()
+
+		for range numConsumer {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for range 50 {
+					if _, err := q.Dequeue(); err == nil {
+						totalDequeued.Add(1)
+					}
+				}
+			}()
+		}
+
+		wg.Wait()
+		got := totalDequeued.Load()
+		if got > int64(numItems) {
+			t.Fatalf("dequeued %d > enqueued %d", got, numItems)
+		}
+		t.Logf("SPMC drain+threshold: dequeued=%d enqueued=%d", got, numItems)
+	})
+
+	// SPMCIndirect
+	t.Run("SPMCIndirect", func(t *testing.T) {
+		q := lfq.NewSPMCIndirect(cap)
+		for i := uintptr(1); i <= numItems; i++ {
+			if err := q.Enqueue(i); err != nil {
+				t.Fatalf("Enqueue(%d): %v", i, err)
+			}
+		}
+
+		var totalDequeued atomix.Int64
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+
+		for range numConsumer {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				for range 50 {
+					if _, err := q.Dequeue(); err == nil {
+						totalDequeued.Add(1)
+					}
+				}
+			}()
+		}
+
+		close(start)
+		time.Sleep(time.Millisecond)
+		q.Drain()
+
+		for range numConsumer {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for range 50 {
+					if _, err := q.Dequeue(); err == nil {
+						totalDequeued.Add(1)
+					}
+				}
+			}()
+		}
+
+		wg.Wait()
+		got := totalDequeued.Load()
+		if got > int64(numItems) {
+			t.Fatalf("dequeued %d > enqueued %d", got, numItems)
+		}
+		t.Logf("SPMCIndirect drain+threshold: dequeued=%d enqueued=%d", got, numItems)
+	})
+
+	// SPMCPtr
+	t.Run("SPMCPtr", func(t *testing.T) {
+		q := lfq.NewSPMCPtr(cap)
+		values := [numItems]int{1, 2, 3}
+		for i := range numItems {
+			if err := q.Enqueue(unsafe.Pointer(&values[i])); err != nil {
+				t.Fatalf("Enqueue(%d): %v", i, err)
+			}
+		}
+
+		var totalDequeued atomix.Int64
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+
+		for range numConsumer {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				for range 50 {
+					if _, err := q.Dequeue(); err == nil {
+						totalDequeued.Add(1)
+					}
+				}
+			}()
+		}
+
+		close(start)
+		time.Sleep(time.Millisecond)
+		q.Drain()
+
+		for range numConsumer {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for range 50 {
+					if _, err := q.Dequeue(); err == nil {
+						totalDequeued.Add(1)
+					}
+				}
+			}()
+		}
+
+		wg.Wait()
+		got := totalDequeued.Load()
+		if got > int64(numItems) {
+			t.Fatalf("dequeued %d > enqueued %d", got, numItems)
+		}
+		t.Logf("SPMCPtr drain+threshold: dequeued=%d enqueued=%d", got, numItems)
+	})
+}
+
+// TestEnqueueStaleSlotContention exercises the stale-slot return path in
+// Enqueue (slotCycle < expectedCycle → ErrWouldBlock). This path triggers
+// when a producer passes the early fullness check but its FAA-claimed slot
+// has not been recycled yet (cycle from a previous round).
+//
+// Strategy: continuous stress test with many producers in tight loops competing
+// for a tiny queue (cap=2). A single consumer dequeues continuously. Over
+// millions of operations, the narrow race window (multiple producers reading
+// the same tail before any FAA) gets hit probabilistically.
+func TestEnqueueStaleSlotContention(t *testing.T) {
+	if lfq.RaceEnabled {
+		t.Skip("skip: lock-free algorithm uses cross-variable memory ordering")
+	}
+
+	const (
+		cap         = 2
+		numProducer = 16
+	)
+
+	prev := runtime.GOMAXPROCS(numProducer + 2)
+	defer runtime.GOMAXPROCS(prev)
+
+	duration := 80 * time.Millisecond
+
+	// MPSC generic
+	t.Run("MPSC", func(t *testing.T) {
+		q := lfq.NewMPSC[int](cap)
+		var stop atomix.Bool
+		var totalEnqueued, totalBlocked atomix.Int64
+		var wg sync.WaitGroup
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for !stop.LoadAcquire() {
+				q.Dequeue()
+			}
+		}()
+
+		wg.Add(numProducer)
+		for range numProducer {
+			go func() {
+				defer wg.Done()
+				v := 1
+				for !stop.LoadAcquire() {
+					if q.Enqueue(&v) == nil {
+						totalEnqueued.Add(1)
+					} else {
+						totalBlocked.Add(1)
+					}
+				}
+			}()
+		}
+
+		time.Sleep(duration)
+		stop.StoreRelease(true)
+		wg.Wait()
+
+		if totalEnqueued.Load() == 0 {
+			t.Error("expected some successful enqueues")
+		}
+		if totalBlocked.Load() == 0 {
+			t.Error("expected some blocked enqueues")
+		}
+		t.Logf("MPSC: enqueued=%d blocked=%d", totalEnqueued.Load(), totalBlocked.Load())
+	})
+
+	// MPSCIndirect
+	t.Run("MPSCIndirect", func(t *testing.T) {
+		q := lfq.NewMPSCIndirect(cap)
+		var stop atomix.Bool
+		var totalEnqueued, totalBlocked atomix.Int64
+		var wg sync.WaitGroup
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for !stop.LoadAcquire() {
+				q.Dequeue()
+			}
+		}()
+
+		wg.Add(numProducer)
+		for range numProducer {
+			go func() {
+				defer wg.Done()
+				for !stop.LoadAcquire() {
+					if q.Enqueue(1) == nil {
+						totalEnqueued.Add(1)
+					} else {
+						totalBlocked.Add(1)
+					}
+				}
+			}()
+		}
+
+		time.Sleep(duration)
+		stop.StoreRelease(true)
+		wg.Wait()
+
+		if totalEnqueued.Load() == 0 {
+			t.Error("expected some successful enqueues")
+		}
+		if totalBlocked.Load() == 0 {
+			t.Error("expected some blocked enqueues")
+		}
+		t.Logf("MPSCIndirect: enqueued=%d blocked=%d", totalEnqueued.Load(), totalBlocked.Load())
+	})
+
+	// MPSCPtr
+	t.Run("MPSCPtr", func(t *testing.T) {
+		q := lfq.NewMPSCPtr(cap)
+		sentinel := 42
+		var stop atomix.Bool
+		var totalEnqueued, totalBlocked atomix.Int64
+		var wg sync.WaitGroup
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for !stop.LoadAcquire() {
+				q.Dequeue()
+			}
+		}()
+
+		wg.Add(numProducer)
+		for range numProducer {
+			go func() {
+				defer wg.Done()
+				for !stop.LoadAcquire() {
+					if q.Enqueue(unsafe.Pointer(&sentinel)) == nil {
+						totalEnqueued.Add(1)
+					} else {
+						totalBlocked.Add(1)
+					}
+				}
+			}()
+		}
+
+		time.Sleep(duration)
+		stop.StoreRelease(true)
+		wg.Wait()
+
+		if totalEnqueued.Load() == 0 {
+			t.Error("expected some successful enqueues")
+		}
+		if totalBlocked.Load() == 0 {
+			t.Error("expected some blocked enqueues")
+		}
+		t.Logf("MPSCPtr: enqueued=%d blocked=%d", totalEnqueued.Load(), totalBlocked.Load())
+	})
+
+	// MPMCIndirect
+	t.Run("MPMCIndirect", func(t *testing.T) {
+		q := lfq.NewMPMCIndirect(cap)
+		var stop atomix.Bool
+		var totalEnqueued, totalBlocked atomix.Int64
+		var wg sync.WaitGroup
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for !stop.LoadAcquire() {
+				q.Dequeue()
+			}
+		}()
+
+		wg.Add(numProducer)
+		for range numProducer {
+			go func() {
+				defer wg.Done()
+				for !stop.LoadAcquire() {
+					if q.Enqueue(1) == nil {
+						totalEnqueued.Add(1)
+					} else {
+						totalBlocked.Add(1)
+					}
+				}
+			}()
+		}
+
+		time.Sleep(duration)
+		stop.StoreRelease(true)
+		wg.Wait()
+
+		if totalEnqueued.Load() == 0 {
+			t.Error("expected some successful enqueues")
+		}
+		if totalBlocked.Load() == 0 {
+			t.Error("expected some blocked enqueues")
+		}
+		t.Logf("MPMCIndirect: enqueued=%d blocked=%d", totalEnqueued.Load(), totalBlocked.Load())
+	})
+
+	// MPMCPtr
+	t.Run("MPMCPtr", func(t *testing.T) {
+		q := lfq.NewMPMCPtr(cap)
+		sentinel := 42
+		var stop atomix.Bool
+		var totalEnqueued, totalBlocked atomix.Int64
+		var wg sync.WaitGroup
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for !stop.LoadAcquire() {
+				q.Dequeue()
+			}
+		}()
+
+		wg.Add(numProducer)
+		for range numProducer {
+			go func() {
+				defer wg.Done()
+				for !stop.LoadAcquire() {
+					if q.Enqueue(unsafe.Pointer(&sentinel)) == nil {
+						totalEnqueued.Add(1)
+					} else {
+						totalBlocked.Add(1)
+					}
+				}
+			}()
+		}
+
+		time.Sleep(duration)
+		stop.StoreRelease(true)
+		wg.Wait()
+
+		if totalEnqueued.Load() == 0 {
+			t.Error("expected some successful enqueues")
+		}
+		if totalBlocked.Load() == 0 {
+			t.Error("expected some blocked enqueues")
+		}
+		t.Logf("MPMCPtr: enqueued=%d blocked=%d", totalEnqueued.Load(), totalBlocked.Load())
 	})
 }
