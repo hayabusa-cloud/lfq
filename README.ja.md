@@ -283,8 +283,33 @@ func EnqueueWithRetry(q lfq.Queue[Item], item Item, maxRetries int) bool {
     }
     return false // 呼び出し元にバックプレッシャーを適用
 }
-
 ```
+
+### グレースフルシャットダウン
+
+FAA ベースのキュー（MPMC、SPMC、MPSC）にはライブロック防止のための閾値メカニズムがあります。プロデューサーがコンシューマーより先に終了するグレースフルシャットダウンでは、`Drainer` インターフェースを使用します：
+
+```go
+// プロデューサーゴルーチンが終了
+prodWg.Wait()
+
+// これ以上エンキューしないことを通知
+if d, ok := q.(lfq.Drainer); ok {
+    d.Drain()
+}
+
+// コンシューマーは閾値ブロッキングなしで
+// 残りの全アイテムをドレインできる
+for {
+    item, err := q.Dequeue()
+    if err != nil {
+        break // キューが空
+    }
+    process(item)
+}
+```
+
+`Drain()` はヒントです — 呼び出し元は以降 `Enqueue()` を呼び出さないことを保証する必要があります。SPSC キューは閾値メカニズムがないため `Drainer` を実装しません。型アサーションがこのケースを自然に処理します。
 
 ## キュー選択ガイド
 

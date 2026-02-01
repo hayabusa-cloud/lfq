@@ -21,6 +21,8 @@ type MPSC[T any] struct {
 	_        pad
 	tail     atomix.Uint64 // Producer index (FAA)
 	_        pad
+	draining atomix.Bool // Drain mode: no more enqueues
+	_        pad
 	buffer   []mpscSlot[T]
 	capacity uint64 // n (usable capacity)
 	size     uint64 // 2n (physical slots)
@@ -57,6 +59,13 @@ func NewMPSC[T any](capacity int) *MPSC[T] {
 	return q
 }
 
+// Drain signals that no more enqueues will occur.
+// This is a hint for graceful shutdown — the caller ensures no further
+// enqueues will be attempted after calling Drain.
+func (q *MPSC[T]) Drain() {
+	q.draining.StoreRelease(true)
+}
+
 // Enqueue adds an element to the queue (multiple producers safe).
 // Returns ErrWouldBlock if the queue is full.
 func (q *MPSC[T]) Enqueue(elem *T) error {
@@ -82,9 +91,7 @@ func (q *MPSC[T]) Enqueue(elem *T) error {
 		}
 
 		if int64(slotCycle) < int64(expectedCycle) {
-			// SCQ slot repair: advance stale slot so dequeue can skip this position
-			slot.cycle.CompareAndSwapAcqRel(slotCycle, expectedCycle+1)
-			return ErrWouldBlock
+			return ErrWouldBlock // Queue full
 		}
 		sw.Once()
 	}

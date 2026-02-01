@@ -286,6 +286,32 @@ func EnqueueWithRetry(q lfq.Queue[Item], item Item, maxRetries int) bool {
 
 ```
 
+### Apagado Elegante
+
+Las colas basadas en FAA (MPMC, SPMC, MPSC) incluyen un mecanismo de umbral para prevenir livelock. Para un apagado elegante donde los productores terminan antes que los consumidores, usa la interfaz `Drainer`:
+
+```go
+// Las goroutines productoras terminan
+prodWg.Wait()
+
+// Señalar que no habrá más enqueues
+if d, ok := q.(lfq.Drainer); ok {
+    d.Drain()
+}
+
+// Los consumidores ahora pueden drenar todos los elementos
+// restantes sin bloqueo por umbral
+for {
+    item, err := q.Dequeue()
+    if err != nil {
+        break // La cola está vacía
+    }
+    process(item)
+}
+```
+
+`Drain()` es una pista — el llamador debe asegurar que no se harán más llamadas a `Enqueue()`. Las colas SPSC no implementan `Drainer` ya que no tienen mecanismo de umbral; la aserción de tipo maneja este caso naturalmente.
+
 ## Cuándo Usar Cada Cola
 
 ```

@@ -23,6 +23,8 @@ type SPMC[T any] struct {
 	_         pad
 	threshold atomix.Int64 // Livelock prevention for consumers
 	_         pad
+	draining  atomix.Bool // Drain mode: skip threshold check
+	_         pad
 	buffer    []spmcSlot[T]
 	capacity  uint64 // n (usable capacity)
 	size      uint64 // 2n (physical slots)
@@ -89,10 +91,19 @@ func (q *SPMC[T]) Enqueue(elem *T) error {
 	return nil
 }
 
+// Drain signals that no more enqueues will occur.
+// After Drain is called, Dequeue skips the threshold check to allow
+// consumers to drain all remaining items without producer pressure.
+func (q *SPMC[T]) Drain() {
+	q.draining.StoreRelease(true)
+}
+
 // Dequeue removes and returns an element (multiple consumers safe).
 // Returns (zero-value, ErrWouldBlock) if the queue is empty.
 func (q *SPMC[T]) Dequeue() (T, error) {
-	if q.threshold.LoadRelaxed() < 0 {
+	// Early exit via threshold (livelock prevention)
+	// Skip threshold check in drain mode
+	if !q.draining.LoadAcquire() && q.threshold.LoadRelaxed() < 0 {
 		var zero T
 		return zero, ErrWouldBlock
 	}
@@ -126,7 +137,7 @@ func (q *SPMC[T]) Dequeue() (T, error) {
 				var zero T
 				return zero, ErrWouldBlock
 			}
-			if q.threshold.AddAcqRel(-1) <= 0 {
+			if q.threshold.AddAcqRel(-1) <= 0 && !q.draining.LoadAcquire() {
 				var zero T
 				return zero, ErrWouldBlock
 			}

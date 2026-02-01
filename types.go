@@ -166,3 +166,28 @@ type ConsumerPtr interface {
 	// Returns (nil, ErrWouldBlock) immediately if the queue is empty.
 	Dequeue() (unsafe.Pointer, error)
 }
+
+// Drainer signals that no more enqueues will occur.
+//
+// FAA-based queues (MPMC, SPMC, MPSC) implement this interface.
+// SPSC queues do not implement Drainer as they have no threshold mechanism.
+//
+// Call Drain after all producers have finished to allow consumers to
+// drain remaining items without threshold blocking.
+//
+// Example:
+//
+//	prodWg.Wait()  // Wait for producers to finish
+//	if d, ok := q.(lfq.Drainer); ok {
+//	    d.Drain()
+//	}
+//	// Consumers can now drain all remaining items
+type Drainer interface {
+	// Drain signals that no more enqueues will occur.
+	// After Drain is called, Dequeue skips threshold checks, allowing
+	// consumers to drain all remaining items without producer pressure.
+	//
+	// Drain is a hint — the caller must ensure no further Enqueue calls
+	// will be made after calling Drain.
+	Drain()
+}

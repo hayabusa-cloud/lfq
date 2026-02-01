@@ -29,6 +29,22 @@ func TestBuilderAPI(t *testing.T) {
 		wantCap int
 	}{
 		{
+			name: "GenericSPSC",
+			build: func() (int, func() error, func() (any, error)) {
+				q := lfq.BuildSPSC[int](lfq.New(7).SingleProducer().SingleConsumer())
+				return q.Cap(), func() error { v := 42; return q.Enqueue(&v) }, func() (any, error) { return q.Dequeue() }
+			},
+			wantCap: 8,
+		},
+		{
+			name: "IndirectSPSC",
+			build: func() (int, func() error, func() (any, error)) {
+				q := lfq.New(7).SingleProducer().SingleConsumer().BuildIndirectSPSC()
+				return q.Cap(), func() error { return q.Enqueue(42) }, func() (any, error) { return q.Dequeue() }
+			},
+			wantCap: 8,
+		},
+		{
 			name: "IndirectMPSC",
 			build: func() (int, func() error, func() (any, error)) {
 				q := lfq.New(7).SingleConsumer().BuildIndirect()
@@ -271,6 +287,50 @@ func TestPanicOnSmallCapacityAllTypes(t *testing.T) {
 				}
 			}()
 			c.fn()
+		})
+	}
+}
+
+// TestPanicBuildSPSC tests that BuildSPSC panics without proper constraints.
+func TestPanicBuildSPSC(t *testing.T) {
+	tests := []struct {
+		name  string
+		build func()
+	}{
+		{"NoConstraints", func() { lfq.BuildSPSC[int](lfq.New(8)) }},
+		{"OnlySP", func() { lfq.BuildSPSC[int](lfq.New(8).SingleProducer()) }},
+		{"OnlySC", func() { lfq.BuildSPSC[int](lfq.New(8).SingleConsumer()) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r == nil {
+					t.Fatal("expected panic")
+				}
+			}()
+			tt.build()
+		})
+	}
+}
+
+// TestPanicBuildIndirectSPSC tests that BuildIndirectSPSC panics without proper constraints.
+func TestPanicBuildIndirectSPSC(t *testing.T) {
+	tests := []struct {
+		name  string
+		build func()
+	}{
+		{"NoConstraints", func() { lfq.New(8).BuildIndirectSPSC() }},
+		{"OnlySP", func() { lfq.New(8).SingleProducer().BuildIndirectSPSC() }},
+		{"OnlySC", func() { lfq.New(8).SingleConsumer().BuildIndirectSPSC() }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r == nil {
+					t.Fatal("expected panic")
+				}
+			}()
+			tt.build()
 		})
 	}
 }
@@ -590,6 +650,94 @@ func TestSPSCWraparound(t *testing.T) {
 				t.Fatalf("cycle %d: got %d, want %d", cycle, elem, expected)
 			}
 		}
+	}
+}
+
+func TestSPSCPtrBasic(t *testing.T) {
+	q := lfq.NewSPSCPtr(4)
+
+	// Test basic enqueue/dequeue
+	val1 := 42
+	val2 := 100
+	if err := q.Enqueue(unsafe.Pointer(&val1)); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	if err := q.Enqueue(unsafe.Pointer(&val2)); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	ptr1, err := q.Dequeue()
+	if err != nil {
+		t.Fatalf("Dequeue: %v", err)
+	}
+	if *(*int)(ptr1) != 42 {
+		t.Fatalf("got %d, want 42", *(*int)(ptr1))
+	}
+
+	ptr2, err := q.Dequeue()
+	if err != nil {
+		t.Fatalf("Dequeue: %v", err)
+	}
+	if *(*int)(ptr2) != 100 {
+		t.Fatalf("got %d, want 100", *(*int)(ptr2))
+	}
+
+	// Test empty dequeue
+	_, err = q.Dequeue()
+	if err != lfq.ErrWouldBlock {
+		t.Fatalf("expected ErrWouldBlock, got %v", err)
+	}
+}
+
+func TestSPSCPtrWraparound(t *testing.T) {
+	q := lfq.NewSPSCPtr(4)
+	values := make([]int, 4)
+
+	// Multiple cycles through the buffer
+	for cycle := range 10 {
+		// Enqueue 4 items
+		for i := range 4 {
+			values[i] = cycle*100 + i
+			if err := q.Enqueue(unsafe.Pointer(&values[i])); err != nil {
+				t.Fatalf("cycle %d: Enqueue: %v", cycle, err)
+			}
+		}
+		// Dequeue 4 items
+		for i := range 4 {
+			ptr, err := q.Dequeue()
+			if err != nil {
+				t.Fatalf("cycle %d: Dequeue: %v", cycle, err)
+			}
+			expected := cycle*100 + i
+			if *(*int)(ptr) != expected {
+				t.Fatalf("cycle %d: got %d, want %d", cycle, *(*int)(ptr), expected)
+			}
+		}
+	}
+}
+
+func TestSPSCPtrFull(t *testing.T) {
+	q := lfq.NewSPSCPtr(4)
+	values := make([]int, 5)
+
+	// Fill queue
+	for i := range 4 {
+		values[i] = i
+		if err := q.Enqueue(unsafe.Pointer(&values[i])); err != nil {
+			t.Fatalf("Enqueue %d: %v", i, err)
+		}
+	}
+
+	// Should fail when full
+	values[4] = 99
+	if err := q.Enqueue(unsafe.Pointer(&values[4])); err != lfq.ErrWouldBlock {
+		t.Fatalf("expected ErrWouldBlock, got %v", err)
+	}
+
+	// Dequeue one and try again
+	q.Dequeue()
+	if err := q.Enqueue(unsafe.Pointer(&values[4])); err != nil {
+		t.Fatalf("Enqueue after dequeue: %v", err)
 	}
 }
 

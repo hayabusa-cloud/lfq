@@ -283,6 +283,33 @@
 // Violating these constraints (e.g., multiple producers on SPSC) causes
 // undefined behavior including data corruption and races.
 //
+// # Graceful Shutdown
+//
+// FAA-based queues (MPMC, SPMC, MPSC) include a threshold mechanism to prevent
+// livelock. This mechanism may cause Dequeue to return [ErrWouldBlock] even when
+// items remain, waiting for producer activity to reset the threshold.
+//
+// For graceful shutdown scenarios where producers have finished but consumers
+// need to drain remaining items, use the [Drainer] interface:
+//
+//	// Producer goroutines finish
+//	prodWg.Wait()
+//
+//	// Signal no more enqueues will occur
+//	if d, ok := q.(lfq.Drainer); ok {
+//	    d.Drain()
+//	}
+//
+//	// Consumers can now drain all remaining items
+//	// without threshold blocking
+//
+// After Drain is called, Dequeue skips threshold checks, allowing consumers
+// to fully drain the queue. Drain is a hint — the caller must ensure no
+// further Enqueue calls will be made.
+//
+// SPSC queues do not implement [Drainer] as they have no threshold mechanism.
+// The type assertion naturally handles this case.
+//
 // # Race Detection
 //
 // Go's race detector is not designed for lock-free algorithm verification.
