@@ -113,6 +113,10 @@ func (q *MPMCCompactIndirect) Dequeue() (uintptr, error) {
 			q.head.CompareAndSwapAcqRel(head, head+1)
 			continue
 		}
+		if elem&emptyFlag != 0 {
+			sw.Once()
+			continue
+		}
 		if q.buffer[idx].CompareAndSwapAcqRel(elem, nextEmpty) {
 			q.head.CompareAndSwapAcqRel(head, head+1)
 			return elem, nil
