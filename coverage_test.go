@@ -1092,6 +1092,233 @@ func TestMPMCBurstPattern(t *testing.T) {
 }
 
 // =============================================================================
+// Coverage: Stale Slot Path (MPSC)
+// =============================================================================
+
+// TestCoverageStaleSlotMPSC exercises the stale-slot return path in MPSC Enqueue.
+// Multiple producers pass the early fullness check simultaneously via FAA,
+// causing some to claim positions beyond available capacity where
+// slotCycle < expectedCycle. These producers return ErrWouldBlock through the
+// stale-slot guard rather than the early fullness check.
+func TestCoverageStaleSlotMPSC(t *testing.T) {
+	if lfq.RaceEnabled {
+		t.Skip("skip: lock-free algorithm uses cross-variable memory ordering")
+	}
+
+	t.Run("Generic", func(t *testing.T) {
+		for range 20 {
+			q := lfq.NewMPSC[int](2)
+			v := 1
+			q.Enqueue(&v)
+
+			const P = 16
+			var wg sync.WaitGroup
+			wg.Add(P)
+			start := make(chan struct{})
+
+			for range P {
+				go func() {
+					defer wg.Done()
+					val := 42
+					<-start
+					q.Enqueue(&val)
+				}()
+			}
+			close(start)
+			wg.Wait()
+		}
+	})
+
+	t.Run("Indirect", func(t *testing.T) {
+		for range 20 {
+			q := lfq.NewMPSCIndirect(2)
+			q.Enqueue(1)
+
+			const P = 16
+			var wg sync.WaitGroup
+			wg.Add(P)
+			start := make(chan struct{})
+
+			for range P {
+				go func() {
+					defer wg.Done()
+					<-start
+					q.Enqueue(42)
+				}()
+			}
+			close(start)
+			wg.Wait()
+		}
+	})
+
+	t.Run("Ptr", func(t *testing.T) {
+		for range 20 {
+			q := lfq.NewMPSCPtr(2)
+			val := 1
+			q.Enqueue(unsafe.Pointer(&val))
+
+			const P = 16
+			var wg sync.WaitGroup
+			wg.Add(P)
+			start := make(chan struct{})
+
+			for range P {
+				go func() {
+					defer wg.Done()
+					v := 42
+					<-start
+					q.Enqueue(unsafe.Pointer(&v))
+				}()
+			}
+			close(start)
+			wg.Wait()
+		}
+	})
+}
+
+// =============================================================================
+// Coverage: Drain + Threshold Path (SPMC)
+// =============================================================================
+
+// TestCoverageDrainThreshold exercises the threshold exhaustion path in SPMC
+// Dequeue when draining is active. With many consumers racing on a small queue
+// while the producer enqueues, consumers encounter stale slots that decrement
+// the threshold counter. After Drain() is called, consumers hitting
+// threshold <= 0 && !draining evaluate to false and continue past the guard,
+// covering the draining=true branch of the threshold check.
+func TestCoverageDrainThreshold(t *testing.T) {
+	if lfq.RaceEnabled {
+		t.Skip("skip: lock-free algorithm uses cross-variable memory ordering")
+	}
+
+	t.Run("Generic", func(t *testing.T) {
+		q := lfq.NewSPMC[int](4)
+		const totalItems = 200
+		const numConsumers = 32
+
+		var consumed atomix.Int64
+		var wg sync.WaitGroup
+
+		wg.Add(numConsumers)
+		for range numConsumers {
+			go func() {
+				defer wg.Done()
+				backoff := iox.Backoff{}
+				for consumed.Load() < totalItems {
+					_, err := q.Dequeue()
+					if err == nil {
+						consumed.Add(1)
+						backoff.Reset()
+					} else {
+						backoff.Wait()
+					}
+				}
+			}()
+		}
+
+		backoff := iox.Backoff{}
+		for i := range totalItems {
+			v := i
+			for q.Enqueue(&v) != nil {
+				backoff.Wait()
+			}
+			backoff.Reset()
+		}
+		q.Drain()
+
+		wg.Wait()
+
+		if consumed.Load() != totalItems {
+			t.Fatalf("consumed: got %d, want %d", consumed.Load(), totalItems)
+		}
+	})
+
+	t.Run("Indirect", func(t *testing.T) {
+		q := lfq.NewSPMCIndirect(4)
+		const totalItems = 200
+		const numConsumers = 32
+
+		var consumed atomix.Int64
+		var wg sync.WaitGroup
+
+		wg.Add(numConsumers)
+		for range numConsumers {
+			go func() {
+				defer wg.Done()
+				backoff := iox.Backoff{}
+				for consumed.Load() < totalItems {
+					_, err := q.Dequeue()
+					if err == nil {
+						consumed.Add(1)
+						backoff.Reset()
+					} else {
+						backoff.Wait()
+					}
+				}
+			}()
+		}
+
+		backoff := iox.Backoff{}
+		for i := range totalItems {
+			for q.Enqueue(uintptr(i+1)) != nil {
+				backoff.Wait()
+			}
+			backoff.Reset()
+		}
+		q.Drain()
+
+		wg.Wait()
+
+		if consumed.Load() != totalItems {
+			t.Fatalf("consumed: got %d, want %d", consumed.Load(), totalItems)
+		}
+	})
+
+	t.Run("Ptr", func(t *testing.T) {
+		q := lfq.NewSPMCPtr(4)
+		const totalItems = 200
+		const numConsumers = 32
+		vals := make([]int, totalItems)
+
+		var consumed atomix.Int64
+		var wg sync.WaitGroup
+
+		wg.Add(numConsumers)
+		for range numConsumers {
+			go func() {
+				defer wg.Done()
+				backoff := iox.Backoff{}
+				for consumed.Load() < totalItems {
+					_, err := q.Dequeue()
+					if err == nil {
+						consumed.Add(1)
+						backoff.Reset()
+					} else {
+						backoff.Wait()
+					}
+				}
+			}()
+		}
+
+		backoff := iox.Backoff{}
+		for i := range totalItems {
+			vals[i] = i + 1
+			for q.Enqueue(unsafe.Pointer(&vals[i])) != nil {
+				backoff.Wait()
+			}
+			backoff.Reset()
+		}
+		q.Drain()
+
+		wg.Wait()
+
+		if consumed.Load() != totalItems {
+			t.Fatalf("consumed: got %d, want %d", consumed.Load(), totalItems)
+		}
+	})
+}
+
+// =============================================================================
 // Benchmarks
 // =============================================================================
 
