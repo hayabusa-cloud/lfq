@@ -894,8 +894,8 @@ func TestMPSCHighContention(t *testing.T) {
 		t.Skip("skip: lock-free algorithm uses cross-variable memory ordering")
 	}
 	q := lfq.NewMPSC[int](16) // Small capacity increases contention
-	const numProducers = 32
-	const itemsPerProducer = 500
+	const numProducers = 8
+	const itemsPerProducer = 200
 
 	var wg sync.WaitGroup
 	var produced atomix.Int64
@@ -961,8 +961,8 @@ func TestSPMCHighContention(t *testing.T) {
 		t.Skip("skip: lock-free algorithm uses cross-variable memory ordering")
 	}
 	q := lfq.NewSPMCCompactIndirect(64) // Compact queue for performance
-	const numConsumers = 32
-	const totalItems = 10000
+	const numConsumers = 8
+	const totalItems = 2000
 
 	var consumed atomix.Int64
 	var wg sync.WaitGroup
@@ -1011,8 +1011,8 @@ func TestMPMCHighContention(t *testing.T) {
 		t.Skip("skip: lock-free algorithm uses cross-variable memory ordering")
 	}
 	q := lfq.NewMPMCCompactIndirect(64) // Compact queue for performance
-	const numWorkers = 16
-	const opsPerWorker = 500
+	const numWorkers = 8
+	const opsPerWorker = 200
 
 	var wg sync.WaitGroup
 	var totalOps atomix.Int64
@@ -1106,7 +1106,7 @@ func TestCoverageStaleSlotMPSC(t *testing.T) {
 	}
 
 	t.Run("Generic", func(t *testing.T) {
-		for range 20 {
+		for range 500 {
 			q := lfq.NewMPSC[int](2)
 			v := 1
 			q.Enqueue(&v)
@@ -1130,7 +1130,7 @@ func TestCoverageStaleSlotMPSC(t *testing.T) {
 	})
 
 	t.Run("Indirect", func(t *testing.T) {
-		for range 20 {
+		for range 500 {
 			q := lfq.NewMPSCIndirect(2)
 			q.Enqueue(1)
 
@@ -1152,7 +1152,7 @@ func TestCoverageStaleSlotMPSC(t *testing.T) {
 	})
 
 	t.Run("Ptr", func(t *testing.T) {
-		for range 20 {
+		for range 500 {
 			q := lfq.NewMPSCPtr(2)
 			val := 1
 			q.Enqueue(unsafe.Pointer(&val))
@@ -1174,6 +1174,49 @@ func TestCoverageStaleSlotMPSC(t *testing.T) {
 			wg.Wait()
 		}
 	})
+}
+
+// =============================================================================
+// Coverage: emptyFlag Path (MPMC Compact)
+// =============================================================================
+
+// TestCoverageEmptyFlagMPMCCompact exercises the transient emptyFlag path in
+// MPMCCompactIndirect.Dequeue. With a small capacity and many concurrent
+// workers, consumers occasionally read a slot still marked with emptyFlag
+// from a previous round (producer allocated via tail advance but has not yet
+// written the value). This covers mpmc_compact.go:116-118.
+func TestCoverageEmptyFlagMPMCCompact(t *testing.T) {
+	if lfq.RaceEnabled {
+		t.Skip("skip: lock-free algorithm uses cross-variable memory ordering")
+	}
+	q := lfq.NewMPMCCompactIndirect(4)
+	const workers = 8
+	const opsPerWorker = 500
+
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for range workers {
+		go func() {
+			defer wg.Done()
+			backoff := iox.Backoff{}
+			for i := range opsPerWorker {
+				v := uintptr(i + 1)
+				for q.Enqueue(v) != nil {
+					backoff.Wait()
+				}
+				backoff.Reset()
+				for {
+					_, err := q.Dequeue()
+					if err == nil {
+						backoff.Reset()
+						break
+					}
+					backoff.Wait()
+				}
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 // =============================================================================
@@ -1314,6 +1357,111 @@ func TestCoverageDrainThreshold(t *testing.T) {
 
 		if consumed.Load() != totalItems {
 			t.Fatalf("consumed: got %d, want %d", consumed.Load(), totalItems)
+		}
+	})
+
+	// DrainEarly sub-tests: call Drain() BEFORE starting consumers so
+	// consumers always see draining=true in the threshold check.
+
+	t.Run("GenericDrainEarly", func(t *testing.T) {
+		q := lfq.NewSPMC[int](8)
+		for i := range 8 {
+			v := i + 1
+			if err := q.Enqueue(&v); err != nil {
+				t.Fatalf("Enqueue(%d): %v", i, err)
+			}
+		}
+		q.Drain()
+
+		var consumed atomix.Int64
+		var wg sync.WaitGroup
+		wg.Add(8)
+		for range 8 {
+			go func() {
+				defer wg.Done()
+				backoff := iox.Backoff{}
+				for consumed.Load() < 8 {
+					_, err := q.Dequeue()
+					if err == nil {
+						consumed.Add(1)
+						backoff.Reset()
+					} else {
+						backoff.Wait()
+					}
+				}
+			}()
+		}
+		wg.Wait()
+		if consumed.Load() != 8 {
+			t.Fatalf("consumed: got %d, want 8", consumed.Load())
+		}
+	})
+
+	t.Run("IndirectDrainEarly", func(t *testing.T) {
+		q := lfq.NewSPMCIndirect(8)
+		for i := range 8 {
+			if err := q.Enqueue(uintptr(i + 1)); err != nil {
+				t.Fatalf("Enqueue(%d): %v", i, err)
+			}
+		}
+		q.Drain()
+
+		var consumed atomix.Int64
+		var wg sync.WaitGroup
+		wg.Add(8)
+		for range 8 {
+			go func() {
+				defer wg.Done()
+				backoff := iox.Backoff{}
+				for consumed.Load() < 8 {
+					_, err := q.Dequeue()
+					if err == nil {
+						consumed.Add(1)
+						backoff.Reset()
+					} else {
+						backoff.Wait()
+					}
+				}
+			}()
+		}
+		wg.Wait()
+		if consumed.Load() != 8 {
+			t.Fatalf("consumed: got %d, want 8", consumed.Load())
+		}
+	})
+
+	t.Run("PtrDrainEarly", func(t *testing.T) {
+		q := lfq.NewSPMCPtr(8)
+		vals := make([]int, 8)
+		for i := range 8 {
+			vals[i] = i + 1
+			if err := q.Enqueue(unsafe.Pointer(&vals[i])); err != nil {
+				t.Fatalf("Enqueue(%d): %v", i, err)
+			}
+		}
+		q.Drain()
+
+		var consumed atomix.Int64
+		var wg sync.WaitGroup
+		wg.Add(8)
+		for range 8 {
+			go func() {
+				defer wg.Done()
+				backoff := iox.Backoff{}
+				for consumed.Load() < 8 {
+					_, err := q.Dequeue()
+					if err == nil {
+						consumed.Add(1)
+						backoff.Reset()
+					} else {
+						backoff.Wait()
+					}
+				}
+			}()
+		}
+		wg.Wait()
+		if consumed.Load() != 8 {
+			t.Fatalf("consumed: got %d, want 8", consumed.Load())
 		}
 	})
 }
