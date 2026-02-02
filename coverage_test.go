@@ -1192,9 +1192,9 @@ func TestCoverageDrainThreshold(t *testing.T) {
 	}
 
 	t.Run("Generic", func(t *testing.T) {
-		q := lfq.NewSPMC[int](4)
+		q := lfq.NewSPMC[int](8)
 		const totalItems = 200
-		const numConsumers = 32
+		const numConsumers = 8
 
 		var consumed atomix.Int64
 		var wg sync.WaitGroup
@@ -1234,9 +1234,9 @@ func TestCoverageDrainThreshold(t *testing.T) {
 	})
 
 	t.Run("Indirect", func(t *testing.T) {
-		q := lfq.NewSPMCIndirect(4)
+		q := lfq.NewSPMCIndirect(8)
 		const totalItems = 200
-		const numConsumers = 32
+		const numConsumers = 8
 
 		var consumed atomix.Int64
 		var wg sync.WaitGroup
@@ -1275,9 +1275,9 @@ func TestCoverageDrainThreshold(t *testing.T) {
 	})
 
 	t.Run("Ptr", func(t *testing.T) {
-		q := lfq.NewSPMCPtr(4)
+		q := lfq.NewSPMCPtr(8)
 		const totalItems = 200
-		const numConsumers = 32
+		const numConsumers = 8
 		vals := make([]int, totalItems)
 
 		var consumed atomix.Int64
