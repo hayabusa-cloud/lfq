@@ -1285,6 +1285,8 @@ func TestHighContentionStressSPMC(t *testing.T) {
 
 	startStressWatchdog(done, &closeOnce, &timedOut, &produced, &consumed, int64(totalItems))
 
+	drainSignal := make(chan struct{})
+
 	// Single producer with correct wait semantics
 	var prodWg sync.WaitGroup
 	prodWg.Add(1)
@@ -1318,11 +1320,15 @@ func TestHighContentionStressSPMC(t *testing.T) {
 		go func() {
 			defer consWg.Done()
 			backoff := iox.Backoff{}
+			draining := false
+			emptyCount := 0
 
 			for consumed.Load() < int64(totalItems) {
 				select {
 				case <-done:
 					return
+				case <-drainSignal:
+					draining = true
 				default:
 				}
 				v, err := q.Dequeue()
@@ -1337,7 +1343,13 @@ func TestHighContentionStressSPMC(t *testing.T) {
 						t.Errorf("duplicate: %d (count=%d)", v, count)
 					}
 					consumed.Add(1)
+					emptyCount = 0
 					backoff.Reset()
+				} else if draining {
+					emptyCount++
+					if emptyCount > 1000 {
+						return
+					}
 				} else {
 					backoff.Wait() // External wait for producer
 				}
@@ -1348,6 +1360,7 @@ func TestHighContentionStressSPMC(t *testing.T) {
 	// Wait for producer to finish, then signal drain mode
 	prodWg.Wait()
 	q.Drain() // Allow consumers to drain remaining items without threshold blocking
+	close(drainSignal)
 	consWg.Wait()
 	closeOnce.Do(func() { close(done) })
 
