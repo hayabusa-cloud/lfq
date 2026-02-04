@@ -1467,6 +1467,58 @@ func TestCoverageDrainThreshold(t *testing.T) {
 }
 
 // =============================================================================
+// Coverage: MPSC Drain (API completeness)
+// =============================================================================
+
+// TestCoverageMPSCDrain exercises the Drain() method on MPSC queues.
+// MPSC Drain is a hint for graceful shutdown — it signals that no more
+// enqueues will occur. The method itself just sets a flag; the coverage
+// ensures the API is exercised.
+func TestCoverageMPSCDrain(t *testing.T) {
+	t.Run("Generic", func(t *testing.T) {
+		q := lfq.NewMPSC[int](4)
+		v := 42
+		q.Enqueue(&v)
+		q.Drain()
+		// Drain doesn't affect dequeue behavior for MPSC
+		got, err := q.Dequeue()
+		if err != nil {
+			t.Fatalf("Dequeue after Drain: %v", err)
+		}
+		if got != 42 {
+			t.Fatalf("got %d, want 42", got)
+		}
+	})
+
+	t.Run("Indirect", func(t *testing.T) {
+		q := lfq.NewMPSCIndirect(4)
+		q.Enqueue(42)
+		q.Drain()
+		got, err := q.Dequeue()
+		if err != nil {
+			t.Fatalf("Dequeue after Drain: %v", err)
+		}
+		if got != 42 {
+			t.Fatalf("got %d, want 42", got)
+		}
+	})
+
+	t.Run("Ptr", func(t *testing.T) {
+		q := lfq.NewMPSCPtr(4)
+		v := 42
+		q.Enqueue(unsafe.Pointer(&v))
+		q.Drain()
+		got, err := q.Dequeue()
+		if err != nil {
+			t.Fatalf("Dequeue after Drain: %v", err)
+		}
+		if got != unsafe.Pointer(&v) {
+			t.Fatalf("got %v, want %v", got, unsafe.Pointer(&v))
+		}
+	})
+}
+
+// =============================================================================
 // Benchmarks
 // =============================================================================
 
