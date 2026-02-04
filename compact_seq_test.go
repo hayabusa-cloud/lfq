@@ -11,6 +11,7 @@ import (
 	"testing"
 	"unsafe"
 
+	"code.hybscloud.com/atomix"
 	"code.hybscloud.com/iox"
 	"code.hybscloud.com/lfq"
 )
@@ -1328,4 +1329,275 @@ func TestSPMCIndirectSeqConcurrent(t *testing.T) {
 	}
 
 	wg.Wait()
+}
+
+// =============================================================================
+// High Contention Tests for CAS Retry Paths
+// =============================================================================
+
+// TestSeqCASRetryContention exercises CAS failure paths in Seq variants.
+// Uses small capacity (2) with many goroutines to force CAS retries.
+func TestSeqCASRetryContention(t *testing.T) {
+	if lfq.RaceEnabled {
+		t.Skip("skip: lock-free algorithm uses cross-variable memory ordering")
+	}
+
+	// SPMCSeq.Dequeue CAS retry path
+	t.Run("SPMCSeq_Dequeue", func(t *testing.T) {
+		q := lfq.NewSPMCSeq[int](2)
+		const numConsumers = 16
+		const totalOps = 500
+
+		var wg sync.WaitGroup
+		var consumed atomix.Int32
+
+		// Single producer - keeps queue fed
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			backoff := iox.Backoff{}
+			for i := range totalOps {
+				v := i + 1
+				for q.Enqueue(&v) != nil {
+					backoff.Wait()
+				}
+				backoff.Reset()
+			}
+		}()
+
+		// Many consumers competing for same slots - forces CAS failures
+		wg.Add(numConsumers)
+		for range numConsumers {
+			go func() {
+				defer wg.Done()
+				backoff := iox.Backoff{}
+				for {
+					if consumed.Load() >= totalOps {
+						return
+					}
+					if _, err := q.Dequeue(); err == nil {
+						consumed.Add(1)
+						backoff.Reset()
+					} else {
+						backoff.Wait()
+					}
+				}
+			}()
+		}
+
+		wg.Wait()
+		if consumed.Load() < totalOps {
+			t.Errorf("consumed %d, want >= %d", consumed.Load(), totalOps)
+		}
+	})
+
+	// SPMCIndirectSeq.Dequeue CAS retry path
+	t.Run("SPMCIndirectSeq_Dequeue", func(t *testing.T) {
+		q := lfq.NewSPMCIndirectSeq(2)
+		const numConsumers = 16
+		const totalOps = 500
+
+		var wg sync.WaitGroup
+		var consumed atomix.Int32
+
+		// Single producer
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			backoff := iox.Backoff{}
+			for i := range totalOps {
+				for q.Enqueue(uintptr(i+1)) != nil {
+					backoff.Wait()
+				}
+				backoff.Reset()
+			}
+		}()
+
+		// Many consumers
+		wg.Add(numConsumers)
+		for range numConsumers {
+			go func() {
+				defer wg.Done()
+				backoff := iox.Backoff{}
+				for {
+					if consumed.Load() >= totalOps {
+						return
+					}
+					if _, err := q.Dequeue(); err == nil {
+						consumed.Add(1)
+						backoff.Reset()
+					} else {
+						backoff.Wait()
+					}
+				}
+			}()
+		}
+
+		wg.Wait()
+		if consumed.Load() < totalOps {
+			t.Errorf("consumed %d, want >= %d", consumed.Load(), totalOps)
+		}
+	})
+
+	// SPMCPtrSeq.Dequeue CAS retry path
+	t.Run("SPMCPtrSeq_Dequeue", func(t *testing.T) {
+		q := lfq.NewSPMCPtrSeq(2)
+		const numConsumers = 16
+		const totalOps = 500
+
+		// Pre-allocate values
+		values := make([]int, totalOps)
+		for i := range values {
+			values[i] = i + 1
+		}
+
+		var wg sync.WaitGroup
+		var consumed atomix.Int32
+
+		// Single producer
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			backoff := iox.Backoff{}
+			for i := range totalOps {
+				for q.Enqueue(unsafe.Pointer(&values[i])) != nil {
+					backoff.Wait()
+				}
+				backoff.Reset()
+			}
+		}()
+
+		// Many consumers
+		wg.Add(numConsumers)
+		for range numConsumers {
+			go func() {
+				defer wg.Done()
+				backoff := iox.Backoff{}
+				for {
+					if consumed.Load() >= totalOps {
+						return
+					}
+					if _, err := q.Dequeue(); err == nil {
+						consumed.Add(1)
+						backoff.Reset()
+					} else {
+						backoff.Wait()
+					}
+				}
+			}()
+		}
+
+		wg.Wait()
+		if consumed.Load() < totalOps {
+			t.Errorf("consumed %d, want >= %d", consumed.Load(), totalOps)
+		}
+	})
+
+	// MPSCIndirectSeq.Enqueue CAS retry path
+	t.Run("MPSCIndirectSeq_Enqueue", func(t *testing.T) {
+		q := lfq.NewMPSCIndirectSeq(2)
+		const numProducers = 16
+		const opsPerProducer = 50
+		totalOps := numProducers * opsPerProducer
+
+		var wg sync.WaitGroup
+		var consumed atomix.Int32
+
+		// Many producers competing for same tail slot - forces CAS failures
+		wg.Add(numProducers)
+		for p := range numProducers {
+			go func(id int) {
+				defer wg.Done()
+				backoff := iox.Backoff{}
+				for i := range opsPerProducer {
+					v := uintptr(id*1000 + i + 1)
+					for q.Enqueue(v) != nil {
+						backoff.Wait()
+					}
+					backoff.Reset()
+				}
+			}(p)
+		}
+
+		// Single consumer
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			backoff := iox.Backoff{}
+			for {
+				if consumed.Load() >= int32(totalOps) {
+					return
+				}
+				if _, err := q.Dequeue(); err == nil {
+					consumed.Add(1)
+					backoff.Reset()
+				} else {
+					backoff.Wait()
+				}
+			}
+		}()
+
+		wg.Wait()
+		if consumed.Load() < int32(totalOps) {
+			t.Errorf("consumed %d, want >= %d", consumed.Load(), totalOps)
+		}
+	})
+
+	// MPSCPtrSeq.Enqueue CAS retry path
+	t.Run("MPSCPtrSeq_Enqueue", func(t *testing.T) {
+		q := lfq.NewMPSCPtrSeq(2)
+		const numProducers = 16
+		const opsPerProducer = 50
+		totalOps := numProducers * opsPerProducer
+
+		// Pre-allocate values per producer
+		values := make([][]int, numProducers)
+		for p := range numProducers {
+			values[p] = make([]int, opsPerProducer)
+			for i := range opsPerProducer {
+				values[p][i] = p*1000 + i + 1
+			}
+		}
+
+		var wg sync.WaitGroup
+		var consumed atomix.Int32
+
+		// Many producers
+		wg.Add(numProducers)
+		for p := range numProducers {
+			go func(id int) {
+				defer wg.Done()
+				backoff := iox.Backoff{}
+				for i := range opsPerProducer {
+					for q.Enqueue(unsafe.Pointer(&values[id][i])) != nil {
+						backoff.Wait()
+					}
+					backoff.Reset()
+				}
+			}(p)
+		}
+
+		// Single consumer
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			backoff := iox.Backoff{}
+			for {
+				if consumed.Load() >= int32(totalOps) {
+					return
+				}
+				if _, err := q.Dequeue(); err == nil {
+					consumed.Add(1)
+					backoff.Reset()
+				} else {
+					backoff.Wait()
+				}
+			}
+		}()
+
+		wg.Wait()
+		if consumed.Load() < int32(totalOps) {
+			t.Errorf("consumed %d, want >= %d", consumed.Load(), totalOps)
+		}
+	})
 }
