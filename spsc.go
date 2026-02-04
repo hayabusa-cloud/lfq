@@ -159,6 +159,8 @@ func (q *SPSCPtr) Enqueue(elem unsafe.Pointer) error {
 			return ErrWouldBlock
 		}
 	}
+	// Pointer arithmetic avoids slice bounds checking in hot path.
+	// Equivalent to q.buffer[tail&q.mask] = elem
 	*(*unsafe.Pointer)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(q.buffer)), int(tail&q.mask)*ptrSize)) = elem
 	q.tail.StoreRelease(tail + 1)
 	return nil
@@ -174,6 +176,8 @@ func (q *SPSCPtr) Dequeue() (unsafe.Pointer, error) {
 			return nil, ErrWouldBlock
 		}
 	}
+	// Pointer arithmetic avoids slice bounds checking in hot path.
+	// Equivalent to elem := q.buffer[head&q.mask]
 	elem := *(*unsafe.Pointer)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(q.buffer)), int(head&q.mask)*ptrSize))
 	q.head.StoreRelease(head + 1)
 	return elem, nil

@@ -1006,6 +1006,8 @@ func TestMPMCStressWithVerification(t *testing.T) {
 // TestThresholdExhaustion verifies the livelock prevention mechanism.
 func TestThresholdExhaustion(t *testing.T) {
 	const cap = 4
+	// thresholdBudget = 3n - 1: maximum empty dequeues before ErrWouldBlock
+	// Formula derivation: (n-1) lagging dequeuers + 2n max slot distance
 	const thresholdBudget = 3*cap - 1 // 11 for capacity 4
 
 	// MPMC

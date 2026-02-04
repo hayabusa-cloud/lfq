@@ -60,6 +60,10 @@ func NewMPMC[T any](capacity int) *MPMC[T] {
 		mask:     size - 1,
 	}
 
+	// Threshold = 3n - 1 = (n-1) + 2n
+	//   (n-1): lagging dequeuers from previous cycle
+	//   2n: maximum physical slot distance (FAA uses 2n slots)
+	// Limits dequeue search to prevent livelock (Nikolaev, DISC 2019).
 	q.threshold.StoreRelaxed(3*int64(n) - 1)
 
 	for i := uint64(0); i < size; i++ {
