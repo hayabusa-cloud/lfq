@@ -49,14 +49,15 @@ func TestMPMCSeqStressConcurrent(t *testing.T) {
 	)
 
 	q := lfq.NewMPMCSeq[int](64)
+	expectedTotal := numProducers * itemsPerProd
+	seen := make([]atomix.Int32, expectedTotal)
+
 	var wg sync.WaitGroup
 	var produced, consumed atomix.Int64
 	var timedOut atomix.Bool
 	deadline := time.Now().Add(timeout)
 
-	expectedTotal := int64(numProducers * itemsPerProd)
-
-	// Producers
+	// Producers: each produces unique values (id*itemsPerProd + seq)
 	for p := range numProducers {
 		wg.Add(1)
 		go func(id int) {
@@ -67,7 +68,7 @@ func TestMPMCSeqStressConcurrent(t *testing.T) {
 					timedOut.Store(true)
 					return
 				}
-				v := id*100000 + i
+				v := id*itemsPerProd + i
 				for q.Enqueue(&v) != nil {
 					if time.Now().After(deadline) {
 						timedOut.Store(true)
@@ -81,23 +82,27 @@ func TestMPMCSeqStressConcurrent(t *testing.T) {
 		}(p)
 	}
 
-	// Consumers
+	// Consumers: track seen values
 	for range numConsumers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			backoff := iox.Backoff{}
-			for consumed.Load() < expectedTotal {
+			for consumed.Load() < int64(expectedTotal) {
 				if time.Now().After(deadline) {
 					timedOut.Store(true)
 					return
 				}
-				if _, err := q.Dequeue(); err == nil {
+				v, err := q.Dequeue()
+				if err == nil {
+					if v >= 0 && v < expectedTotal {
+						seen[v].Add(1)
+					}
 					consumed.Add(1)
 					backoff.Reset()
 				} else {
 					// Check if all produced and nothing left
-					if produced.Load() == expectedTotal && consumed.Load() >= expectedTotal {
+					if produced.Load() == int64(expectedTotal) && consumed.Load() == int64(expectedTotal) {
 						return
 					}
 					backoff.Wait()
@@ -113,8 +118,19 @@ func TestMPMCSeqStressConcurrent(t *testing.T) {
 	}
 
 	// All produced items must be consumed (no loss)
-	if got := consumed.Load(); got != expectedTotal {
+	if got := consumed.Load(); got != int64(expectedTotal) {
 		t.Errorf("consumed %d, want %d", got, expectedTotal)
+	}
+
+	// Verify: no duplicates
+	var duplicates int
+	for i := range expectedTotal {
+		if count := seen[i].Load(); count > 1 {
+			duplicates++
+		}
+	}
+	if duplicates > 0 {
+		t.Errorf("linearizability violation: %d duplicates", duplicates)
 	}
 }
 
@@ -248,12 +264,13 @@ func TestMPSCSeqStressConcurrent(t *testing.T) {
 	)
 
 	q := lfq.NewMPSCSeq[int](64)
+	expectedTotal := numProducers * itemsPerProd
+	seen := make([]atomix.Int32, expectedTotal)
+
 	var wg sync.WaitGroup
 	var produced, consumed atomix.Int64
 	var timedOut atomix.Bool
 	deadline := time.Now().Add(timeout)
-
-	expectedTotal := int64(numProducers * itemsPerProd)
 
 	// Producers: multiple goroutines
 	for p := range numProducers {
@@ -266,7 +283,7 @@ func TestMPSCSeqStressConcurrent(t *testing.T) {
 					timedOut.Store(true)
 					return
 				}
-				v := id*100000 + i
+				v := id*itemsPerProd + i
 				for q.Enqueue(&v) != nil {
 					if time.Now().After(deadline) {
 						timedOut.Store(true)
@@ -280,21 +297,25 @@ func TestMPSCSeqStressConcurrent(t *testing.T) {
 		}(p)
 	}
 
-	// Single consumer (MPSC contract)
+	// Single consumer (MPSC contract): track seen values
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		backoff := iox.Backoff{}
-		for consumed.Load() < expectedTotal {
+		for consumed.Load() < int64(expectedTotal) {
 			if time.Now().After(deadline) {
 				timedOut.Store(true)
 				return
 			}
-			if _, err := q.Dequeue(); err == nil {
+			v, err := q.Dequeue()
+			if err == nil {
+				if v >= 0 && v < expectedTotal {
+					seen[v].Add(1)
+				}
 				consumed.Add(1)
 				backoff.Reset()
 			} else {
-				if produced.Load() == expectedTotal && consumed.Load() >= expectedTotal {
+				if produced.Load() == int64(expectedTotal) && consumed.Load() == int64(expectedTotal) {
 					return
 				}
 				backoff.Wait()
@@ -308,8 +329,19 @@ func TestMPSCSeqStressConcurrent(t *testing.T) {
 		t.Logf("timeout: produced=%d, consumed=%d/%d", produced.Load(), consumed.Load(), expectedTotal)
 	}
 
-	if got := consumed.Load(); got != expectedTotal {
+	if got := consumed.Load(); got != int64(expectedTotal) {
 		t.Errorf("consumed %d, want %d", got, expectedTotal)
+	}
+
+	// Verify: no duplicates
+	var duplicates int
+	for i := range expectedTotal {
+		if count := seen[i].Load(); count > 1 {
+			duplicates++
+		}
+	}
+	if duplicates > 0 {
+		t.Errorf("linearizability violation: %d duplicates", duplicates)
 	}
 }
 
@@ -440,6 +472,8 @@ func TestSPMCSeqStressConcurrent(t *testing.T) {
 	)
 
 	q := lfq.NewSPMCSeq[int](64)
+	seen := make([]atomix.Int32, itemCount)
+
 	var wg sync.WaitGroup
 	var produced, consumed atomix.Int64
 	var timedOut atomix.Bool
@@ -468,7 +502,7 @@ func TestSPMCSeqStressConcurrent(t *testing.T) {
 		}
 	}()
 
-	// Multiple consumers
+	// Multiple consumers: track seen values
 	for range numConsumers {
 		wg.Add(1)
 		go func() {
@@ -479,11 +513,15 @@ func TestSPMCSeqStressConcurrent(t *testing.T) {
 					timedOut.Store(true)
 					return
 				}
-				if _, err := q.Dequeue(); err == nil {
+				v, err := q.Dequeue()
+				if err == nil {
+					if v >= 0 && v < itemCount {
+						seen[v].Add(1)
+					}
 					consumed.Add(1)
 					backoff.Reset()
 				} else {
-					if produced.Load() == itemCount && consumed.Load() >= itemCount {
+					if produced.Load() == itemCount && consumed.Load() == int64(itemCount) {
 						return
 					}
 					backoff.Wait()
@@ -500,6 +538,17 @@ func TestSPMCSeqStressConcurrent(t *testing.T) {
 
 	if got := consumed.Load(); got != int64(itemCount) {
 		t.Errorf("consumed %d, want %d", got, itemCount)
+	}
+
+	// Verify: no duplicates
+	var duplicates int
+	for i := range itemCount {
+		if count := seen[i].Load(); count > 1 {
+			duplicates++
+		}
+	}
+	if duplicates > 0 {
+		t.Errorf("linearizability violation: %d duplicates", duplicates)
 	}
 }
 
@@ -630,15 +679,16 @@ func TestMPMCPtrSeqStressConcurrent(t *testing.T) {
 	)
 
 	q := lfq.NewMPMCPtrSeq(64)
+	expectedTotal := numProducers * itemsPerProd
+	seen := make([]atomix.Int32, expectedTotal)
+
 	var wg sync.WaitGroup
 	var produced, consumed atomix.Int64
 	var timedOut atomix.Bool
 	deadline := time.Now().Add(timeout)
 
-	expectedTotal := int64(numProducers * itemsPerProd)
-
 	// Pre-allocate values to avoid GC pressure
-	values := make([]int, numProducers*itemsPerProd)
+	values := make([]int, expectedTotal)
 	for i := range values {
 		values[i] = i
 	}
@@ -668,22 +718,29 @@ func TestMPMCPtrSeqStressConcurrent(t *testing.T) {
 		}(p)
 	}
 
-	// Consumers
+	// Consumers: track seen values
 	for range numConsumers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			backoff := iox.Backoff{}
-			for consumed.Load() < expectedTotal {
+			for consumed.Load() < int64(expectedTotal) {
 				if time.Now().After(deadline) {
 					timedOut.Store(true)
 					return
 				}
-				if _, err := q.Dequeue(); err == nil {
+				ptr, err := q.Dequeue()
+				if err == nil {
+					if ptr != nil {
+						v := *(*int)(ptr)
+						if v >= 0 && v < expectedTotal {
+							seen[v].Add(1)
+						}
+					}
 					consumed.Add(1)
 					backoff.Reset()
 				} else {
-					if produced.Load() == expectedTotal && consumed.Load() >= expectedTotal {
+					if produced.Load() == int64(expectedTotal) && consumed.Load() == int64(expectedTotal) {
 						return
 					}
 					backoff.Wait()
@@ -698,8 +755,19 @@ func TestMPMCPtrSeqStressConcurrent(t *testing.T) {
 		t.Logf("timeout: produced=%d, consumed=%d/%d", produced.Load(), consumed.Load(), expectedTotal)
 	}
 
-	if got := consumed.Load(); got != expectedTotal {
+	if got := consumed.Load(); got != int64(expectedTotal) {
 		t.Errorf("consumed %d, want %d", got, expectedTotal)
+	}
+
+	// Verify: no duplicates
+	var duplicates int
+	for i := range expectedTotal {
+		if count := seen[i].Load(); count > 1 {
+			duplicates++
+		}
+	}
+	if duplicates > 0 {
+		t.Errorf("linearizability violation: %d duplicates", duplicates)
 	}
 }
 
@@ -716,15 +784,16 @@ func TestMPSCPtrSeqStressConcurrent(t *testing.T) {
 	)
 
 	q := lfq.NewMPSCPtrSeq(64)
+	expectedTotal := numProducers * itemsPerProd
+	seen := make([]atomix.Int32, expectedTotal)
+
 	var wg sync.WaitGroup
 	var produced, consumed atomix.Int64
 	var timedOut atomix.Bool
 	deadline := time.Now().Add(timeout)
 
-	expectedTotal := int64(numProducers * itemsPerProd)
-
 	// Pre-allocate
-	values := make([]int, numProducers*itemsPerProd)
+	values := make([]int, expectedTotal)
 	for i := range values {
 		values[i] = i
 	}
@@ -754,21 +823,28 @@ func TestMPSCPtrSeqStressConcurrent(t *testing.T) {
 		}(p)
 	}
 
-	// Single consumer
+	// Single consumer: track seen values
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		backoff := iox.Backoff{}
-		for consumed.Load() < expectedTotal {
+		for consumed.Load() < int64(expectedTotal) {
 			if time.Now().After(deadline) {
 				timedOut.Store(true)
 				return
 			}
-			if _, err := q.Dequeue(); err == nil {
+			ptr, err := q.Dequeue()
+			if err == nil {
+				if ptr != nil {
+					v := *(*int)(ptr)
+					if v >= 0 && v < expectedTotal {
+						seen[v].Add(1)
+					}
+				}
 				consumed.Add(1)
 				backoff.Reset()
 			} else {
-				if produced.Load() == expectedTotal && consumed.Load() >= expectedTotal {
+				if produced.Load() == int64(expectedTotal) && consumed.Load() == int64(expectedTotal) {
 					return
 				}
 				backoff.Wait()
@@ -782,8 +858,19 @@ func TestMPSCPtrSeqStressConcurrent(t *testing.T) {
 		t.Logf("timeout: produced=%d, consumed=%d/%d", produced.Load(), consumed.Load(), expectedTotal)
 	}
 
-	if got := consumed.Load(); got != expectedTotal {
+	if got := consumed.Load(); got != int64(expectedTotal) {
 		t.Errorf("consumed %d, want %d", got, expectedTotal)
+	}
+
+	// Verify: no duplicates
+	var duplicates int
+	for i := range expectedTotal {
+		if count := seen[i].Load(); count > 1 {
+			duplicates++
+		}
+	}
+	if duplicates > 0 {
+		t.Errorf("linearizability violation: %d duplicates", duplicates)
 	}
 }
 
@@ -800,6 +887,8 @@ func TestSPMCPtrSeqStressConcurrent(t *testing.T) {
 	)
 
 	q := lfq.NewSPMCPtrSeq(64)
+	seen := make([]atomix.Int32, itemCount)
+
 	var wg sync.WaitGroup
 	var produced, consumed atomix.Int64
 	var timedOut atomix.Bool
@@ -833,7 +922,7 @@ func TestSPMCPtrSeqStressConcurrent(t *testing.T) {
 		}
 	}()
 
-	// Multiple consumers
+	// Multiple consumers: track seen values
 	for range numConsumers {
 		wg.Add(1)
 		go func() {
@@ -844,11 +933,18 @@ func TestSPMCPtrSeqStressConcurrent(t *testing.T) {
 					timedOut.Store(true)
 					return
 				}
-				if _, err := q.Dequeue(); err == nil {
+				ptr, err := q.Dequeue()
+				if err == nil {
+					if ptr != nil {
+						v := *(*int)(ptr)
+						if v >= 0 && v < itemCount {
+							seen[v].Add(1)
+						}
+					}
 					consumed.Add(1)
 					backoff.Reset()
 				} else {
-					if produced.Load() == int64(itemCount) && consumed.Load() >= int64(itemCount) {
+					if produced.Load() == int64(itemCount) && consumed.Load() == int64(itemCount) {
 						return
 					}
 					backoff.Wait()
@@ -865,5 +961,16 @@ func TestSPMCPtrSeqStressConcurrent(t *testing.T) {
 
 	if got := consumed.Load(); got != int64(itemCount) {
 		t.Errorf("consumed %d, want %d", got, itemCount)
+	}
+
+	// Verify: no duplicates
+	var duplicates int
+	for i := range itemCount {
+		if count := seen[i].Load(); count > 1 {
+			duplicates++
+		}
+	}
+	if duplicates > 0 {
+		t.Errorf("linearizability violation: %d duplicates", duplicates)
 	}
 }
