@@ -286,6 +286,32 @@ func EnqueueWithRetry(q lfq.Queue[Item], item Item, maxRetries int) bool {
 
 ```
 
+### Graceful Shutdown
+
+FAA-based queues (MPMC, SPMC, MPSC) include a threshold mechanism to prevent livelock. For graceful shutdown where producers finish before consumers, use the `Drainer` interface:
+
+```go
+// Producer goroutines finish
+prodWg.Wait()
+
+// Signal no more enqueues will occur
+if d, ok := q.(lfq.Drainer); ok {
+    d.Drain()
+}
+
+// Consumers can now drain all remaining items
+// without threshold blocking
+for {
+    item, err := q.Dequeue()
+    if err != nil {
+        break // Queue is empty
+    }
+    process(item)
+}
+```
+
+`Drain()` is a hint — the caller must ensure no further `Enqueue()` calls will be made. SPSC queues do not implement `Drainer` as they have no threshold mechanism; the type assertion naturally handles this case.
+
 ## When to Use Which Queue
 
 ```

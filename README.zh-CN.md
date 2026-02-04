@@ -286,6 +286,32 @@ func EnqueueWithRetry(q lfq.Queue[Item], item Item, maxRetries int) bool {
 
 ```
 
+### 优雅关闭
+
+FAA 基队列（MPMC、SPMC、MPSC）包含防止活锁的阈值机制。在生产者先于消费者结束的优雅关闭场景中，使用 `Drainer` 接口：
+
+```go
+// 生产者协程结束
+prodWg.Wait()
+
+// 通知不再有入队操作
+if d, ok := q.(lfq.Drainer); ok {
+    d.Drain()
+}
+
+// 消费者现在可以在没有阈值阻塞的情况下
+// 消耗所有剩余项目
+for {
+    item, err := q.Dequeue()
+    if err != nil {
+        break // 队列为空
+    }
+    process(item)
+}
+```
+
+`Drain()` 是一个提示 — 调用者必须确保之后不再调用 `Enqueue()`。SPSC 队列没有阈值机制，因此不实现 `Drainer`；类型断言会自然处理这种情况。
+
 ## 如何选择队列
 
 ```

@@ -1083,4 +1083,146 @@ func TestThresholdExhaustion(t *testing.T) {
 
 		t.Logf("Threshold exhausted after %d ErrWouldBlock returns", wouldBlockCount)
 	})
+
+	// MPMCIndirect
+	t.Run("MPMCIndirect", func(t *testing.T) {
+		q := lfq.NewMPMCIndirect(cap)
+
+		for i := uintptr(1); i <= cap; i++ {
+			if err := q.Enqueue(i); err != nil {
+				t.Fatalf("Initial enqueue(%d): %v", i, err)
+			}
+		}
+		for range cap {
+			if _, err := q.Dequeue(); err != nil {
+				t.Fatalf("Initial dequeue: %v", err)
+			}
+		}
+
+		var wouldBlockCount int
+		for i := 0; i < thresholdBudget+5; i++ {
+			_, err := q.Dequeue()
+			if err == lfq.ErrWouldBlock {
+				wouldBlockCount++
+			}
+		}
+
+		if wouldBlockCount == 0 {
+			t.Fatal("Expected ErrWouldBlock after exhausting threshold")
+		}
+
+		_, err := q.Dequeue()
+		if err != lfq.ErrWouldBlock {
+			t.Fatalf("Expected ErrWouldBlock when threshold exhausted, got %v", err)
+		}
+
+		t.Logf("Threshold exhausted after %d ErrWouldBlock returns", wouldBlockCount)
+	})
+
+	// MPMCPtr
+	t.Run("MPMCPtr", func(t *testing.T) {
+		q := lfq.NewMPMCPtr(cap)
+
+		values := [cap]int{1, 2, 3, 4}
+		for i := range cap {
+			if err := q.Enqueue(unsafe.Pointer(&values[i])); err != nil {
+				t.Fatalf("Initial enqueue(%d): %v", i, err)
+			}
+		}
+		for range cap {
+			if _, err := q.Dequeue(); err != nil {
+				t.Fatalf("Initial dequeue: %v", err)
+			}
+		}
+
+		var wouldBlockCount int
+		for i := 0; i < thresholdBudget+5; i++ {
+			_, err := q.Dequeue()
+			if err == lfq.ErrWouldBlock {
+				wouldBlockCount++
+			}
+		}
+
+		if wouldBlockCount == 0 {
+			t.Fatal("Expected ErrWouldBlock after exhausting threshold")
+		}
+
+		_, err := q.Dequeue()
+		if err != lfq.ErrWouldBlock {
+			t.Fatalf("Expected ErrWouldBlock when threshold exhausted, got %v", err)
+		}
+
+		t.Logf("Threshold exhausted after %d ErrWouldBlock returns", wouldBlockCount)
+	})
+
+	// SPMCIndirect
+	t.Run("SPMCIndirect", func(t *testing.T) {
+		q := lfq.NewSPMCIndirect(cap)
+
+		for i := uintptr(1); i <= cap; i++ {
+			if err := q.Enqueue(i); err != nil {
+				t.Fatalf("Initial enqueue(%d): %v", i, err)
+			}
+		}
+		for range cap {
+			if _, err := q.Dequeue(); err != nil {
+				t.Fatalf("Initial dequeue: %v", err)
+			}
+		}
+
+		var wouldBlockCount int
+		for i := 0; i < thresholdBudget+5; i++ {
+			_, err := q.Dequeue()
+			if err == lfq.ErrWouldBlock {
+				wouldBlockCount++
+			}
+		}
+
+		if wouldBlockCount == 0 {
+			t.Fatal("Expected ErrWouldBlock after exhausting threshold")
+		}
+
+		_, err := q.Dequeue()
+		if err != lfq.ErrWouldBlock {
+			t.Fatalf("Expected ErrWouldBlock when threshold exhausted, got %v", err)
+		}
+
+		t.Logf("Threshold exhausted after %d ErrWouldBlock returns", wouldBlockCount)
+	})
+
+	// SPMCPtr
+	t.Run("SPMCPtr", func(t *testing.T) {
+		q := lfq.NewSPMCPtr(cap)
+
+		values := [cap]int{1, 2, 3, 4}
+		for i := range cap {
+			if err := q.Enqueue(unsafe.Pointer(&values[i])); err != nil {
+				t.Fatalf("Initial enqueue(%d): %v", i, err)
+			}
+		}
+		for range cap {
+			if _, err := q.Dequeue(); err != nil {
+				t.Fatalf("Initial dequeue: %v", err)
+			}
+		}
+
+		var wouldBlockCount int
+		for i := 0; i < thresholdBudget+5; i++ {
+			_, err := q.Dequeue()
+			if err == lfq.ErrWouldBlock {
+				wouldBlockCount++
+			}
+		}
+
+		if wouldBlockCount == 0 {
+			t.Fatal("Expected ErrWouldBlock after exhausting threshold")
+		}
+
+		_, err := q.Dequeue()
+		if err != lfq.ErrWouldBlock {
+			t.Fatalf("Expected ErrWouldBlock when threshold exhausted, got %v", err)
+		}
+
+		t.Logf("Threshold exhausted after %d ErrWouldBlock returns", wouldBlockCount)
+	})
 }
