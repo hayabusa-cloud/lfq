@@ -1352,7 +1352,7 @@ func TestHighContentionStressSPMC(t *testing.T) {
 	closeOnce.Do(func() { close(done) })
 
 	if timedOut.Load() {
-		t.Logf("SPMC stress timeout (produced=%d consumed=%d)", produced.Load(), consumed.Load())
+		t.Fatalf("SPMC stress timeout (produced=%d consumed=%d)", produced.Load(), consumed.Load())
 	}
 
 	// Complete verification
