@@ -110,7 +110,7 @@ func (q *SPMCCompactIndirect) Dequeue() (uintptr, error) {
 		}
 
 		if elem&emptyFlag != 0 {
-			sw.Once()
+			q.head.CompareAndSwapAcqRel(head, head+1)
 			continue
 		}
 
