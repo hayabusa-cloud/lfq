@@ -974,3 +974,28 @@ func TestSPMCPtrSeqStressConcurrent(t *testing.T) {
 		t.Errorf("linearizability violation: %d duplicates", duplicates)
 	}
 }
+
+// =============================================================================
+// Seq Variant Drainer Absence Tests
+// =============================================================================
+
+// TestSeqVariantsNoDrainer verifies Seq variants lack threshold mechanism.
+// Seq variants use CAS-based per-slot sequences instead of the FAA+threshold
+// approach, so they don't implement the Drainer interface.
+func TestSeqVariantsNoDrainer(t *testing.T) {
+	tests := []struct {
+		name  string
+		queue any
+	}{
+		{"MPMCSeq", lfq.NewMPMCSeq[int](8)},
+		{"MPSCSeq", lfq.NewMPSCSeq[int](8)},
+		{"SPMCSeq", lfq.NewSPMCSeq[int](8)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, ok := tt.queue.(lfq.Drainer); ok {
+				t.Fatalf("%s should not implement Drainer", tt.name)
+			}
+		})
+	}
+}
