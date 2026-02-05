@@ -22,37 +22,18 @@ Standard Go compiler will compile but with degraded performance (~2.5ns overhead
 | SPSC | Wait-free | n slots | Same |
 | MPSC/SPMC/MPMC | Lock-free | 2n slots | n slots |
 
-## Review Checklist
+## Review Focus
 
-### Algorithm
+Lock-free algorithm correctness, not code style. Key areas:
 
-- [ ] FAA default, CAS only with `Compact()`
-- [ ] FAA = 2n slots, CAS = n slots, SPSC = n
-- [ ] Threshold mechanism for FAA MPMC/SPMC only
+- Memory ordering (acquire/release pairs)
+- Slot count matches algorithm (see Quick Reference)
+- Retry loops use `spin.Wait{}`
 
-### Memory Ordering
+## Pitfalls
 
-- [ ] `LoadAcquire`/`StoreRelease` pairs correct
-- [ ] `AddAcquire` for FAA position claiming
-- [ ] 64-byte padding between head/tail
-
-### Atomic Operation Retry Loops
-
-- [ ] Uses `spin.Wait{}` with `sw.Once()`
-- [ ] No raw loops without backoff
-
-### Builders
-
-- [ ] `BuildSPSC` requires SP + SC
-- [ ] `BuildMPSC` requires SC only
-- [ ] `BuildSPMC` requires SP only
-
-## Common Issues
-
-- Wrong slot count (must be 2n for FAA)
-- Missing `spin.Wait` in retry loops
-- Incorrect cycle calculation (`position / size` not `/ capacity`)
-- Compact Indirect values must be < 63 bits
+- Mixing FAA slot math (2n) with CAS slot math (n)
+- Missing spin wait in retry loops
 
 ## Error Handling
 
