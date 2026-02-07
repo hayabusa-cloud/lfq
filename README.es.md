@@ -50,7 +50,8 @@ Instalación manual:
 
 ```bash
 # Versión pre-compilada (recomendada)
-curl -fsSL https://github.com/hayabusa-cloud/go/releases/latest/download/go1.25.6.linux-amd64.tar.gz | tar -xz -C ~/sdk
+URL=$(curl -fsSL https://api.github.com/repos/hayabusa-cloud/go/releases/latest | grep 'browser_download_url.*linux-amd64\.tar\.gz"' | cut -d'"' -f4)
+curl -fsSL "$URL" | tar -xz -C ~/sdk
 mv ~/sdk/go ~/sdk/go-atomix
 
 # Usar para compilar código dependiente de lfq
