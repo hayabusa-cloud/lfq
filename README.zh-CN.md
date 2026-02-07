@@ -50,7 +50,9 @@ make install-compiler-source
 
 ```bash
 # 预构建版本（推荐）
-URL=$(curl -fsSL https://api.github.com/repos/hayabusa-cloud/go/releases/latest | grep 'browser_download_url.*linux-amd64\.tar\.gz"' | cut -d'"' -f4)
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+URL=$(curl -fsSL https://api.github.com/repos/hayabusa-cloud/go/releases/latest | grep "browser_download_url.*${OS}-${ARCH}\.tar\.gz\"" | cut -d'"' -f4)
 curl -fsSL "$URL" | tar -xz -C ~/sdk
 mv ~/sdk/go ~/sdk/go-atomix
 
