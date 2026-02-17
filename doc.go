@@ -34,8 +34,7 @@
 //	q := lfq.NewMPMC[int](1024)
 //
 //	// Enqueue (non-blocking)
-//	value := 42
-//	err := q.Enqueue(&value)
+//	err := q.Enqueue(new(42))
 //	if lfq.IsWouldBlock(err) {
 //	    // Queue is full - handle backpressure
 //	}
