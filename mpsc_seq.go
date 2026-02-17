@@ -49,7 +49,7 @@ func NewMPSCSeq[T any](capacity int) *MPSCSeq[T] {
 		capacity: n,
 	}
 
-	for i := uint64(0); i < n; i++ {
+	for i := range n {
 		q.buffer[i].seq.StoreRelaxed(i)
 	}
 

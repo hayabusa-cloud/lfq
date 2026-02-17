@@ -66,7 +66,7 @@ func NewMPMC[T any](capacity int) *MPMC[T] {
 	// Limits dequeue search to prevent livelock (Nikolaev, DISC 2019).
 	q.threshold.StoreRelaxed(3*int64(n) - 1)
 
-	for i := uint64(0); i < size; i++ {
+	for i := range size {
 		q.buffer[i].cycle.StoreRelaxed(i / n)
 	}
 

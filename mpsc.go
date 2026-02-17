@@ -52,7 +52,7 @@ func NewMPSC[T any](capacity int) *MPSC[T] {
 		mask:     size - 1,
 	}
 
-	for i := uint64(0); i < size; i++ {
+	for i := range size {
 		q.buffer[i].cycle.StoreRelaxed(i / n)
 	}
 

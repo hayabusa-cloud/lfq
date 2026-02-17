@@ -43,7 +43,7 @@ func NewSPMCIndirectSeq(capacity int) *SPMCIndirectSeq {
 		capacity: n,
 	}
 
-	for i := uint64(0); i < n; i++ {
+	for i := range n {
 		q.buffer[i].entry.StoreRelaxed(i, 0)
 	}
 
@@ -129,7 +129,7 @@ func NewSPMCPtrSeq(capacity int) *SPMCPtrSeq {
 		capacity: n,
 	}
 
-	for i := uint64(0); i < n; i++ {
+	for i := range n {
 		q.buffer[i].entry.StoreRelaxed(i, 0)
 	}
 

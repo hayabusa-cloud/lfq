@@ -54,7 +54,7 @@ func NewMPMCIndirectSeq(capacity int) *MPMCIndirectSeq {
 	}
 
 	// Initialize: seq[i] = i (ready for write at round 0), val = 0
-	for i := uint64(0); i < n; i++ {
+	for i := range n {
 		q.buffer[i].entry.StoreRelaxed(i, 0)
 	}
 
@@ -152,7 +152,7 @@ func NewMPMCPtrSeq(capacity int) *MPMCPtrSeq {
 		capacity: n,
 	}
 
-	for i := uint64(0); i < n; i++ {
+	for i := range n {
 		q.buffer[i].entry.StoreRelaxed(i, 0)
 	}
 
