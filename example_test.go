@@ -29,8 +29,7 @@ func ExampleNewSPSC() {
 
 	// Producer sends 5 values
 	for i := 1; i <= 5; i++ {
-		v := i * 10
-		q.Enqueue(&v)
+		q.Enqueue(new(i * 10))
 	}
 
 	// Consumer receives values
@@ -177,13 +176,11 @@ func ExampleIsWouldBlock() {
 	q := lfq.NewSPSC[int](2) // Cap()=2
 
 	// Fill the queue
-	one, two := 1, 2
-	q.Enqueue(&one)
-	q.Enqueue(&two)
+	q.Enqueue(new(1))
+	q.Enqueue(new(2))
 
 	// Queue is full
-	five := 5
-	err := q.Enqueue(&five)
+	err := q.Enqueue(new(5))
 	if lfq.IsWouldBlock(err) {
 		fmt.Println("Queue full - applying backpressure")
 	}
@@ -355,8 +352,7 @@ func Example_backpressure() {
 	// Fill the queue
 	filled := 0
 	for i := 1; i <= 10; i++ {
-		v := i
-		err := q.Enqueue(&v)
+		err := q.Enqueue(new(i))
 		if err == nil {
 			filled++
 		} else if lfq.IsWouldBlock(err) {
@@ -373,8 +369,7 @@ func Example_backpressure() {
 	}
 
 	// Now we can enqueue more
-	v := 100
-	if q.Enqueue(&v) == nil {
+	if q.Enqueue(new(100)) == nil {
 		fmt.Println("Enqueued 100 after draining")
 	}
 
@@ -392,8 +387,7 @@ func Example_batchProcessing() {
 
 	// Single producer submits items sequentially
 	for i := 1; i <= 9; i++ {
-		v := i
-		q.Enqueue(&v)
+		q.Enqueue(new(i))
 	}
 
 	// Batch processing: collect up to batchSize items

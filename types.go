@@ -20,8 +20,7 @@ import "unsafe"
 //	q := lfq.NewMPMC[int](1024)
 //
 //	// Enqueue
-//	val := 42
-//	if err := q.Enqueue(&val); err != nil {
+//	if err := q.Enqueue(new(42)); err != nil {
 //	    // Handle full queue
 //	}
 //

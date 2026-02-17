@@ -56,7 +56,7 @@ func NewSPMC[T any](capacity int) *SPMC[T] {
 
 	q.threshold.StoreRelaxed(3*int64(n) - 1)
 
-	for i := uint64(0); i < size; i++ {
+	for i := range size {
 		q.buffer[i].cycle.StoreRelaxed(i / n)
 	}
 

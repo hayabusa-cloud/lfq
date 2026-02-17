@@ -61,7 +61,7 @@ func NewMPMCIndirect(capacity int) *MPMCIndirect {
 
 	q.threshold.StoreRelaxed(3*int64(n) - 1)
 
-	for i := uint64(0); i < size; i++ {
+	for i := range size {
 		q.buffer[i].entry.StoreRelaxed(i/n, 0)
 	}
 
@@ -211,7 +211,7 @@ func NewMPMCPtr(capacity int) *MPMCPtr {
 	q.threshold.StoreRelaxed(3*int64(n) - 1)
 
 	// Initialize slots based on their first use position's cycle
-	for i := uint64(0); i < size; i++ {
+	for i := range size {
 		q.buffer[i].entry.StoreRelaxed(i/n, 0)
 	}
 

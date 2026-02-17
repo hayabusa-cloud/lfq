@@ -57,7 +57,7 @@ func NewSPMCIndirect(capacity int) *SPMCIndirect {
 	// Initialize slots based on their first use position's cycle
 	// Slots 0 to n-1: first used at positions 0-(n-1), cycle 0
 	// Slots n to 2n-1: first used at positions n-(2n-1), cycle 1
-	for i := uint64(0); i < size; i++ {
+	for i := range size {
 		q.buffer[i].entry.StoreRelaxed(i/n, 0)
 	}
 
@@ -209,7 +209,7 @@ func NewSPMCPtr(capacity int) *SPMCPtr {
 
 	q.threshold.StoreRelaxed(3*int64(n) - 1)
 
-	for i := uint64(0); i < size; i++ {
+	for i := range size {
 		q.buffer[i].entry.StoreRelaxed(i/n, 0)
 	}
 

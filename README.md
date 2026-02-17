@@ -30,7 +30,7 @@ q := lfq.Build[Event](lfq.New(1024))                                    // → M
 go get code.hybscloud.com/lfq
 ```
 
-**Requirements:** Go 1.25+
+**Requirements:** Go 1.26+
 
 ### Compiler Requirement
 
@@ -266,7 +266,7 @@ go func() {
     for {
         ev, err := events.Dequeue()
         if err == nil {
-            aggregate(*ev)
+            aggregate(ev)
         }
     }
 }()

@@ -43,7 +43,7 @@ func NewMPSCIndirectSeq(capacity int) *MPSCIndirectSeq {
 		capacity: n,
 	}
 
-	for i := uint64(0); i < n; i++ {
+	for i := range n {
 		q.buffer[i].entry.StoreRelaxed(i, 0)
 	}
 
@@ -129,7 +129,7 @@ func NewMPSCPtrSeq(capacity int) *MPSCPtrSeq {
 		capacity: n,
 	}
 
-	for i := uint64(0); i < n; i++ {
+	for i := range n {
 		q.buffer[i].entry.StoreRelaxed(i, 0)
 	}
 
