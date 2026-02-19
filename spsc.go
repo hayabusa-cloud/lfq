@@ -115,6 +115,7 @@ func NewSPSCIndirect(capacity int) *SPSCIndirect {
 }
 
 // Init initializes a zero-value SPSCIndirect queue in place.
+// Capacity rounds up to the next power of 2.
 func (q *SPSCIndirect) Init(capacity int) {
 	if capacity < 2 {
 		panic("lfq: capacity must be >= 2")
@@ -155,6 +156,7 @@ func NewSPSCPtr(capacity int) *SPSCPtr {
 }
 
 // Init initializes a zero-value SPSCPtr queue in place.
+// Capacity rounds up to the next power of 2.
 func (q *SPSCPtr) Init(capacity int) {
 	if capacity < 2 {
 		panic("lfq: capacity must be >= 2")

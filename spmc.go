@@ -46,6 +46,7 @@ func NewSPMC[T any](capacity int) *SPMC[T] {
 }
 
 // Init initializes a zero-value SPMC queue in place.
+// Capacity rounds up to the next power of 2.
 func (q *SPMC[T]) Init(capacity int) {
 	if capacity < 2 {
 		panic("lfq: capacity must be >= 2")

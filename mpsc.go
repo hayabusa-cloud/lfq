@@ -44,6 +44,7 @@ func NewMPSC[T any](capacity int) *MPSC[T] {
 }
 
 // Init initializes a zero-value MPSC queue in place.
+// Capacity rounds up to the next power of 2.
 func (q *MPSC[T]) Init(capacity int) {
 	if capacity < 2 {
 		panic("lfq: capacity must be >= 2")

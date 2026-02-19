@@ -38,6 +38,7 @@ func NewMPSCIndirectSeq(capacity int) *MPSCIndirectSeq {
 }
 
 // Init initializes a zero-value MPSCIndirectSeq queue in place.
+// Capacity rounds up to the next power of 2.
 func (q *MPSCIndirectSeq) Init(capacity int) {
 	if capacity < 2 {
 		panic("lfq: capacity must be >= 2")
@@ -127,6 +128,7 @@ func NewMPSCPtrSeq(capacity int) *MPSCPtrSeq {
 }
 
 // Init initializes a zero-value MPSCPtrSeq queue in place.
+// Capacity rounds up to the next power of 2.
 func (q *MPSCPtrSeq) Init(capacity int) {
 	if capacity < 2 {
 		panic("lfq: capacity must be >= 2")

@@ -42,6 +42,7 @@ func NewMPSCIndirect(capacity int) *MPSCIndirect {
 }
 
 // Init initializes a zero-value MPSCIndirect queue in place.
+// Capacity rounds up to the next power of 2.
 func (q *MPSCIndirect) Init(capacity int) {
 	if capacity < 2 {
 		panic("lfq: capacity must be >= 2")
@@ -159,6 +160,7 @@ func NewMPSCPtr(capacity int) *MPSCPtr {
 }
 
 // Init initializes a zero-value MPSCPtr queue in place.
+// Capacity rounds up to the next power of 2.
 func (q *MPSCPtr) Init(capacity int) {
 	if capacity < 2 {
 		panic("lfq: capacity must be >= 2")

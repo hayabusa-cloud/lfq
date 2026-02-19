@@ -44,6 +44,7 @@ func NewSPMCIndirect(capacity int) *SPMCIndirect {
 }
 
 // Init initializes a zero-value SPMCIndirect queue in place.
+// Capacity rounds up to the next power of 2.
 func (q *SPMCIndirect) Init(capacity int) {
 	if capacity < 2 {
 		panic("lfq: capacity must be >= 2")
@@ -199,6 +200,7 @@ func NewSPMCPtr(capacity int) *SPMCPtr {
 }
 
 // Init initializes a zero-value SPMCPtr queue in place.
+// Capacity rounds up to the next power of 2.
 func (q *SPMCPtr) Init(capacity int) {
 	if capacity < 2 {
 		panic("lfq: capacity must be >= 2")

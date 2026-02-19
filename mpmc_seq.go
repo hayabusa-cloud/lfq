@@ -47,6 +47,7 @@ func NewMPMCSeq[T any](capacity int) *MPMCSeq[T] {
 }
 
 // Init initializes a zero-value MPMCSeq queue in place.
+// Capacity rounds up to the next power of 2.
 func (q *MPMCSeq[T]) Init(capacity int) {
 	if capacity < 2 {
 		panic("lfq: capacity must be >= 2")

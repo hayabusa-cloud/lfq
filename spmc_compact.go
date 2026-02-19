@@ -37,6 +37,7 @@ func NewSPMCCompactIndirect(capacity int) *SPMCCompactIndirect {
 }
 
 // Init initializes a zero-value SPMCCompactIndirect queue in place.
+// Capacity rounds up to the next power of 2.
 func (q *SPMCCompactIndirect) Init(capacity int) {
 	if capacity < 2 {
 		panic("lfq: capacity must be >= 2")
