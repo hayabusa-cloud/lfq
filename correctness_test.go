@@ -800,7 +800,7 @@ func TestIndirectValuePreservationConcurrent(t *testing.T) {
 	q := lfq.NewMPMCIndirect(2048)
 	const totalItems = 2000 // Reduced for faster execution
 
-	var wg sync.WaitGroup
+	var prodWg, consWg sync.WaitGroup
 	produced := make([]uintptr, totalItems)
 	consumed := make([]uintptr, 0, totalItems)
 	var consumedMu sync.Mutex
@@ -813,10 +813,10 @@ func TestIndirectValuePreservationConcurrent(t *testing.T) {
 	}
 
 	// Producers
-	wg.Add(4)
+	prodWg.Add(4)
 	for p := range 4 {
 		go func(id int) {
-			defer wg.Done()
+			defer prodWg.Done()
 			backoff := iox.Backoff{}
 			start := id * (totalItems / 4)
 			end := start + (totalItems / 4)
@@ -835,10 +835,10 @@ func TestIndirectValuePreservationConcurrent(t *testing.T) {
 
 	// Consumers
 	var consumeCount atomix.Int64
-	wg.Add(4)
+	consWg.Add(4)
 	for range 4 {
 		go func() {
-			defer wg.Done()
+			defer consWg.Done()
 			backoff := iox.Backoff{}
 			for consumeCount.Load() < totalItems {
 				if time.Now().After(deadline) {
@@ -859,7 +859,9 @@ func TestIndirectValuePreservationConcurrent(t *testing.T) {
 		}()
 	}
 
-	wg.Wait()
+	prodWg.Wait()
+	q.Drain()
+	consWg.Wait()
 
 	if timedOut.Load() {
 		t.Fatalf("timeout: consumed %d/%d", consumeCount.Load(), totalItems)
