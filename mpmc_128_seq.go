@@ -42,23 +42,26 @@ type mpmc128SeqSlot struct {
 // Capacity rounds up to the next power of 2.
 // This is the Compact variant. Use NewMPMCIndirect for the default FAA-based implementation.
 func NewMPMCIndirectSeq(capacity int) *MPMCIndirectSeq {
+	q := &MPMCIndirectSeq{}
+	q.Init(capacity)
+	return q
+}
+
+// Init initializes a zero-value MPMCIndirectSeq queue in place.
+// Capacity rounds up to the next power of 2.
+func (q *MPMCIndirectSeq) Init(capacity int) {
 	if capacity < 2 {
 		panic("lfq: capacity must be >= 2")
 	}
 
 	n := uint64(roundToPow2(capacity))
-	q := &MPMCIndirectSeq{
-		buffer:   make([]mpmc128SeqSlot, n),
-		mask:     n - 1,
-		capacity: n,
-	}
+	q.buffer = make([]mpmc128SeqSlot, n)
+	q.mask = n - 1
+	q.capacity = n
 
-	// Initialize: seq[i] = i (ready for write at round 0), val = 0
 	for i := range n {
 		q.buffer[i].entry.StoreRelaxed(i, 0)
 	}
-
-	return q
 }
 
 // Enqueue adds an element to the queue.
@@ -141,22 +144,26 @@ type MPMCPtrSeq struct {
 // Capacity rounds up to the next power of 2.
 // This is the Compact variant. Use NewMPMCPtr for the default FAA-based implementation.
 func NewMPMCPtrSeq(capacity int) *MPMCPtrSeq {
+	q := &MPMCPtrSeq{}
+	q.Init(capacity)
+	return q
+}
+
+// Init initializes a zero-value MPMCPtrSeq queue in place.
+// Capacity rounds up to the next power of 2.
+func (q *MPMCPtrSeq) Init(capacity int) {
 	if capacity < 2 {
 		panic("lfq: capacity must be >= 2")
 	}
 
 	n := uint64(roundToPow2(capacity))
-	q := &MPMCPtrSeq{
-		buffer:   make([]mpmc128SeqSlot, n),
-		mask:     n - 1,
-		capacity: n,
-	}
+	q.buffer = make([]mpmc128SeqSlot, n)
+	q.mask = n - 1
+	q.capacity = n
 
 	for i := range n {
 		q.buffer[i].entry.StoreRelaxed(i, 0)
 	}
-
-	return q
 }
 
 // Enqueue adds an element to the queue.

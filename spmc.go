@@ -40,6 +40,14 @@ type spmcSlot[T any] struct {
 // NewSPMC creates a new FAA-based SPMC queue.
 // Capacity rounds up to the next power of 2.
 func NewSPMC[T any](capacity int) *SPMC[T] {
+	q := &SPMC[T]{}
+	q.Init(capacity)
+	return q
+}
+
+// Init initializes a zero-value SPMC queue in place.
+// Capacity rounds up to the next power of 2.
+func (q *SPMC[T]) Init(capacity int) {
 	if capacity < 2 {
 		panic("lfq: capacity must be >= 2")
 	}
@@ -47,20 +55,16 @@ func NewSPMC[T any](capacity int) *SPMC[T] {
 	n := uint64(roundToPow2(capacity))
 	size := n * 2
 
-	q := &SPMC[T]{
-		buffer:   make([]spmcSlot[T], size),
-		capacity: n,
-		size:     size,
-		mask:     size - 1,
-	}
+	q.buffer = make([]spmcSlot[T], size)
+	q.capacity = n
+	q.size = size
+	q.mask = size - 1
 
 	q.threshold.StoreRelaxed(3*int64(n) - 1)
 
 	for i := range size {
 		q.buffer[i].cycle.StoreRelaxed(i / n)
 	}
-
-	return q
 }
 
 // Enqueue adds an element to the queue (single producer only).

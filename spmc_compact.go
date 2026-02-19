@@ -31,6 +31,14 @@ type SPMCCompactIndirect struct {
 // Capacity rounds up to the next power of 2.
 // Values are limited to 63 bits (high bit reserved for empty flag).
 func NewSPMCCompactIndirect(capacity int) *SPMCCompactIndirect {
+	q := &SPMCCompactIndirect{}
+	q.Init(capacity)
+	return q
+}
+
+// Init initializes a zero-value SPMCCompactIndirect queue in place.
+// Capacity rounds up to the next power of 2.
+func (q *SPMCCompactIndirect) Init(capacity int) {
 	if capacity < 2 {
 		panic("lfq: capacity must be >= 2")
 	}
@@ -41,18 +49,14 @@ func NewSPMCCompactIndirect(capacity int) *SPMCCompactIndirect {
 		order++
 	}
 
-	q := &SPMCCompactIndirect{
-		buffer:   make([]atomix.Uintptr, n),
-		mask:     n - 1,
-		capacity: n,
-		order:    order,
-	}
+	q.buffer = make([]atomix.Uintptr, n)
+	q.mask = n - 1
+	q.capacity = n
+	q.order = order
 
 	for i := range q.buffer {
 		q.buffer[i].StoreRelaxed(emptyFlag | 0)
 	}
-
-	return q
 }
 
 // Enqueue adds a value (single producer only).
