@@ -38,22 +38,25 @@ type spmcSeqSlot[T any] struct {
 // Capacity rounds up to the next power of 2.
 // This is the Compact variant. Use NewSPMC for the default FAA-based implementation.
 func NewSPMCSeq[T any](capacity int) *SPMCSeq[T] {
+	q := &SPMCSeq[T]{}
+	q.Init(capacity)
+	return q
+}
+
+// Init initializes a zero-value SPMCSeq queue in place.
+func (q *SPMCSeq[T]) Init(capacity int) {
 	if capacity < 2 {
 		panic("lfq: capacity must be >= 2")
 	}
 
 	n := uint64(roundToPow2(capacity))
-	q := &SPMCSeq[T]{
-		buffer:   make([]spmcSeqSlot[T], n),
-		mask:     n - 1,
-		capacity: n,
-	}
+	q.buffer = make([]spmcSeqSlot[T], n)
+	q.mask = n - 1
+	q.capacity = n
 
 	for i := range n {
 		q.buffer[i].seq.StoreRelaxed(i)
 	}
-
-	return q
 }
 
 // Enqueue adds an element to the queue (single producer only).

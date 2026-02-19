@@ -46,31 +46,30 @@ type mpmcSlot[T any] struct {
 // Capacity rounds up to the next power of 2.
 // Physical slot count is 2n for capacity n (SCQ requirement).
 func NewMPMC[T any](capacity int) *MPMC[T] {
+	q := &MPMC[T]{}
+	q.Init(capacity)
+	return q
+}
+
+// Init initializes a zero-value MPMC queue in place.
+func (q *MPMC[T]) Init(capacity int) {
 	if capacity < 2 {
 		panic("lfq: capacity must be >= 2")
 	}
 
 	n := uint64(roundToPow2(capacity))
-	size := n * 2 // 2n physical slots
+	size := n * 2
 
-	q := &MPMC[T]{
-		buffer:   make([]mpmcSlot[T], size),
-		capacity: n,
-		size:     size,
-		mask:     size - 1,
-	}
+	q.buffer = make([]mpmcSlot[T], size)
+	q.capacity = n
+	q.size = size
+	q.mask = size - 1
 
-	// Threshold = 3n - 1 = (n-1) + 2n
-	//   (n-1): lagging dequeuers from previous cycle
-	//   2n: maximum physical slot distance (FAA uses 2n slots)
-	// Limits dequeue search to prevent livelock (Nikolaev, DISC 2019).
 	q.threshold.StoreRelaxed(3*int64(n) - 1)
 
 	for i := range size {
 		q.buffer[i].cycle.StoreRelaxed(i / n)
 	}
-
-	return q
 }
 
 // Enqueue adds an element to the queue.

@@ -34,15 +34,21 @@ type SPSC[T any] struct {
 // NewSPSC creates a new SPSC queue.
 // Capacity rounds up to the next power of 2.
 func NewSPSC[T any](capacity int) *SPSC[T] {
+	q := &SPSC[T]{}
+	q.Init(capacity)
+	return q
+}
+
+// Init initializes a zero-value SPSC queue in place.
+// Capacity rounds up to the next power of 2.
+func (q *SPSC[T]) Init(capacity int) {
 	if capacity < 2 {
 		panic("lfq: capacity must be >= 2")
 	}
 
 	n := uint64(roundToPow2(capacity))
-	return &SPSC[T]{
-		buffer: make([]T, n),
-		mask:   n - 1,
-	}
+	q.buffer = make([]T, n)
+	q.mask = n - 1
 }
 
 // Enqueue adds an element to the queue (producer only).
@@ -103,15 +109,20 @@ type SPSCIndirect struct {
 // NewSPSCIndirect creates a new SPSC queue for uintptr values.
 // Capacity rounds up to the next power of 2.
 func NewSPSCIndirect(capacity int) *SPSCIndirect {
+	q := &SPSCIndirect{}
+	q.Init(capacity)
+	return q
+}
+
+// Init initializes a zero-value SPSCIndirect queue in place.
+func (q *SPSCIndirect) Init(capacity int) {
 	if capacity < 2 {
 		panic("lfq: capacity must be >= 2")
 	}
 
 	n := uint64(roundToPow2(capacity))
-	return &SPSCIndirect{
-		buffer: make([]uintptr, n),
-		mask:   n - 1,
-	}
+	q.buffer = make([]uintptr, n)
+	q.mask = n - 1
 }
 
 // Cap returns the queue capacity.
@@ -138,15 +149,20 @@ type SPSCPtr struct {
 // NewSPSCPtr creates a new SPSC queue for unsafe.Pointer values.
 // Capacity rounds up to the next power of 2.
 func NewSPSCPtr(capacity int) *SPSCPtr {
+	q := &SPSCPtr{}
+	q.Init(capacity)
+	return q
+}
+
+// Init initializes a zero-value SPSCPtr queue in place.
+func (q *SPSCPtr) Init(capacity int) {
 	if capacity < 2 {
 		panic("lfq: capacity must be >= 2")
 	}
 
 	n := uint64(roundToPow2(capacity))
-	return &SPSCPtr{
-		buffer: make([]unsafe.Pointer, n),
-		mask:   n - 1,
-	}
+	q.buffer = make([]unsafe.Pointer, n)
+	q.mask = n - 1
 }
 
 // Enqueue adds an element (producer only).

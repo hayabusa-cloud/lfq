@@ -45,6 +45,13 @@ type mpmc128Slot struct {
 // Capacity rounds up to the next power of 2.
 // Physical slot count is 2n for capacity n.
 func NewMPMCIndirect(capacity int) *MPMCIndirect {
+	q := &MPMCIndirect{}
+	q.Init(capacity)
+	return q
+}
+
+// Init initializes a zero-value MPMCIndirect queue in place.
+func (q *MPMCIndirect) Init(capacity int) {
 	if capacity < 2 {
 		panic("lfq: capacity must be >= 2")
 	}
@@ -52,20 +59,16 @@ func NewMPMCIndirect(capacity int) *MPMCIndirect {
 	n := uint64(roundToPow2(capacity))
 	size := n * 2
 
-	q := &MPMCIndirect{
-		buffer:   make([]mpmc128Slot, size),
-		capacity: n,
-		size:     size,
-		mask:     size - 1,
-	}
+	q.buffer = make([]mpmc128Slot, size)
+	q.capacity = n
+	q.size = size
+	q.mask = size - 1
 
 	q.threshold.StoreRelaxed(3*int64(n) - 1)
 
 	for i := range size {
 		q.buffer[i].entry.StoreRelaxed(i/n, 0)
 	}
-
-	return q
 }
 
 // Drain signals that no more enqueues will occur.
@@ -194,6 +197,13 @@ type MPMCPtr struct {
 // NewMPMCPtr creates a new FAA-based MPMC queue for unsafe.Pointer values.
 // Capacity rounds up to the next power of 2.
 func NewMPMCPtr(capacity int) *MPMCPtr {
+	q := &MPMCPtr{}
+	q.Init(capacity)
+	return q
+}
+
+// Init initializes a zero-value MPMCPtr queue in place.
+func (q *MPMCPtr) Init(capacity int) {
 	if capacity < 2 {
 		panic("lfq: capacity must be >= 2")
 	}
@@ -201,21 +211,16 @@ func NewMPMCPtr(capacity int) *MPMCPtr {
 	n := uint64(roundToPow2(capacity))
 	size := n * 2
 
-	q := &MPMCPtr{
-		buffer:   make([]mpmc128Slot, size),
-		capacity: n,
-		size:     size,
-		mask:     size - 1,
-	}
+	q.buffer = make([]mpmc128Slot, size)
+	q.capacity = n
+	q.size = size
+	q.mask = size - 1
 
 	q.threshold.StoreRelaxed(3*int64(n) - 1)
 
-	// Initialize slots based on their first use position's cycle
 	for i := range size {
 		q.buffer[i].entry.StoreRelaxed(i/n, 0)
 	}
-
-	return q
 }
 
 // Drain signals that no more enqueues will occur.

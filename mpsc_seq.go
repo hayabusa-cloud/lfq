@@ -38,22 +38,25 @@ type mpscSeqSlot[T any] struct {
 // Capacity rounds up to the next power of 2.
 // This is the Compact variant. Use NewMPSC for the default FAA-based implementation.
 func NewMPSCSeq[T any](capacity int) *MPSCSeq[T] {
+	q := &MPSCSeq[T]{}
+	q.Init(capacity)
+	return q
+}
+
+// Init initializes a zero-value MPSCSeq queue in place.
+func (q *MPSCSeq[T]) Init(capacity int) {
 	if capacity < 2 {
 		panic("lfq: capacity must be >= 2")
 	}
 
 	n := uint64(roundToPow2(capacity))
-	q := &MPSCSeq[T]{
-		buffer:   make([]mpscSeqSlot[T], n),
-		mask:     n - 1,
-		capacity: n,
-	}
+	q.buffer = make([]mpscSeqSlot[T], n)
+	q.mask = n - 1
+	q.capacity = n
 
 	for i := range n {
 		q.buffer[i].seq.StoreRelaxed(i)
 	}
-
-	return q
 }
 
 // Enqueue adds an element to the queue (multiple producers safe).

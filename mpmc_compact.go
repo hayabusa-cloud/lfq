@@ -35,6 +35,13 @@ type MPMCCompactIndirect struct {
 // Capacity rounds up to the next power of 2.
 // Values are limited to 63 bits (high bit reserved for empty flag).
 func NewMPMCCompactIndirect(capacity int) *MPMCCompactIndirect {
+	q := &MPMCCompactIndirect{}
+	q.Init(capacity)
+	return q
+}
+
+// Init initializes a zero-value MPMCCompactIndirect queue in place.
+func (q *MPMCCompactIndirect) Init(capacity int) {
 	if capacity < 2 {
 		panic("lfq: capacity must be >= 2")
 	}
@@ -45,18 +52,14 @@ func NewMPMCCompactIndirect(capacity int) *MPMCCompactIndirect {
 		order++
 	}
 
-	q := &MPMCCompactIndirect{
-		buffer:   make([]atomix.Uintptr, n),
-		mask:     n - 1,
-		capacity: n,
-		order:    order,
-	}
+	q.buffer = make([]atomix.Uintptr, n)
+	q.mask = n - 1
+	q.capacity = n
+	q.order = order
 
 	for i := range q.buffer {
 		q.buffer[i].StoreRelaxed(emptyFlag | 0)
 	}
-
-	return q
 }
 
 // Enqueue adds a value to the queue.

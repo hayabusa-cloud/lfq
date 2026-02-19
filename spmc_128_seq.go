@@ -32,22 +32,25 @@ type SPMCIndirectSeq struct {
 // NewSPMCIndirectSeq creates a new SPMC queue for uintptr values.
 // Capacity rounds up to the next power of 2.
 func NewSPMCIndirectSeq(capacity int) *SPMCIndirectSeq {
+	q := &SPMCIndirectSeq{}
+	q.Init(capacity)
+	return q
+}
+
+// Init initializes a zero-value SPMCIndirectSeq queue in place.
+func (q *SPMCIndirectSeq) Init(capacity int) {
 	if capacity < 2 {
 		panic("lfq: capacity must be >= 2")
 	}
 
 	n := uint64(roundToPow2(capacity))
-	q := &SPMCIndirectSeq{
-		buffer:   make([]mpmc128SeqSlot, n),
-		mask:     n - 1,
-		capacity: n,
-	}
+	q.buffer = make([]mpmc128SeqSlot, n)
+	q.mask = n - 1
+	q.capacity = n
 
 	for i := range n {
 		q.buffer[i].entry.StoreRelaxed(i, 0)
 	}
-
-	return q
 }
 
 // Enqueue adds an element (single producer only).
@@ -118,22 +121,25 @@ type SPMCPtrSeq struct {
 // NewSPMCPtrSeq creates a new SPMC queue for unsafe.Pointer values.
 // Capacity rounds up to the next power of 2.
 func NewSPMCPtrSeq(capacity int) *SPMCPtrSeq {
+	q := &SPMCPtrSeq{}
+	q.Init(capacity)
+	return q
+}
+
+// Init initializes a zero-value SPMCPtrSeq queue in place.
+func (q *SPMCPtrSeq) Init(capacity int) {
 	if capacity < 2 {
 		panic("lfq: capacity must be >= 2")
 	}
 
 	n := uint64(roundToPow2(capacity))
-	q := &SPMCPtrSeq{
-		buffer:   make([]mpmc128SeqSlot, n),
-		mask:     n - 1,
-		capacity: n,
-	}
+	q.buffer = make([]mpmc128SeqSlot, n)
+	q.mask = n - 1
+	q.capacity = n
 
 	for i := range n {
 		q.buffer[i].entry.StoreRelaxed(i, 0)
 	}
-
-	return q
 }
 
 // Enqueue adds an element (single producer only).

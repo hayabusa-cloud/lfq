@@ -38,6 +38,13 @@ type SPMCIndirect struct {
 // NewSPMCIndirect creates a new FAA-based SPMC queue for uintptr values.
 // Capacity rounds up to the next power of 2.
 func NewSPMCIndirect(capacity int) *SPMCIndirect {
+	q := &SPMCIndirect{}
+	q.Init(capacity)
+	return q
+}
+
+// Init initializes a zero-value SPMCIndirect queue in place.
+func (q *SPMCIndirect) Init(capacity int) {
 	if capacity < 2 {
 		panic("lfq: capacity must be >= 2")
 	}
@@ -45,23 +52,16 @@ func NewSPMCIndirect(capacity int) *SPMCIndirect {
 	n := uint64(roundToPow2(capacity))
 	size := n * 2
 
-	q := &SPMCIndirect{
-		buffer:   make([]mpmc128Slot, size),
-		capacity: n,
-		size:     size,
-		mask:     size - 1,
-	}
+	q.buffer = make([]mpmc128Slot, size)
+	q.capacity = n
+	q.size = size
+	q.mask = size - 1
 
 	q.threshold.StoreRelaxed(3*int64(n) - 1)
 
-	// Initialize slots based on their first use position's cycle
-	// Slots 0 to n-1: first used at positions 0-(n-1), cycle 0
-	// Slots n to 2n-1: first used at positions n-(2n-1), cycle 1
 	for i := range size {
 		q.buffer[i].entry.StoreRelaxed(i/n, 0)
 	}
-
-	return q
 }
 
 // Drain signals that no more enqueues will occur.
@@ -193,6 +193,13 @@ type SPMCPtr struct {
 // NewSPMCPtr creates a new FAA-based SPMC queue for unsafe.Pointer values.
 // Capacity rounds up to the next power of 2.
 func NewSPMCPtr(capacity int) *SPMCPtr {
+	q := &SPMCPtr{}
+	q.Init(capacity)
+	return q
+}
+
+// Init initializes a zero-value SPMCPtr queue in place.
+func (q *SPMCPtr) Init(capacity int) {
 	if capacity < 2 {
 		panic("lfq: capacity must be >= 2")
 	}
@@ -200,20 +207,16 @@ func NewSPMCPtr(capacity int) *SPMCPtr {
 	n := uint64(roundToPow2(capacity))
 	size := n * 2
 
-	q := &SPMCPtr{
-		buffer:   make([]mpmc128Slot, size),
-		capacity: n,
-		size:     size,
-		mask:     size - 1,
-	}
+	q.buffer = make([]mpmc128Slot, size)
+	q.capacity = n
+	q.size = size
+	q.mask = size - 1
 
 	q.threshold.StoreRelaxed(3*int64(n) - 1)
 
 	for i := range size {
 		q.buffer[i].entry.StoreRelaxed(i/n, 0)
 	}
-
-	return q
 }
 
 // Drain signals that no more enqueues will occur.

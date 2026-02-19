@@ -38,6 +38,13 @@ type mpscSlot[T any] struct {
 // NewMPSC creates a new FAA-based MPSC queue.
 // Capacity rounds up to the next power of 2.
 func NewMPSC[T any](capacity int) *MPSC[T] {
+	q := &MPSC[T]{}
+	q.Init(capacity)
+	return q
+}
+
+// Init initializes a zero-value MPSC queue in place.
+func (q *MPSC[T]) Init(capacity int) {
 	if capacity < 2 {
 		panic("lfq: capacity must be >= 2")
 	}
@@ -45,18 +52,14 @@ func NewMPSC[T any](capacity int) *MPSC[T] {
 	n := uint64(roundToPow2(capacity))
 	size := n * 2
 
-	q := &MPSC[T]{
-		buffer:   make([]mpscSlot[T], size),
-		capacity: n,
-		size:     size,
-		mask:     size - 1,
-	}
+	q.buffer = make([]mpscSlot[T], size)
+	q.capacity = n
+	q.size = size
+	q.mask = size - 1
 
 	for i := range size {
 		q.buffer[i].cycle.StoreRelaxed(i / n)
 	}
-
-	return q
 }
 
 // Drain signals that no more enqueues will occur.

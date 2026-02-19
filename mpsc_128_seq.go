@@ -32,22 +32,25 @@ type MPSCIndirectSeq struct {
 // NewMPSCIndirectSeq creates a new MPSC queue for uintptr values.
 // Capacity rounds up to the next power of 2.
 func NewMPSCIndirectSeq(capacity int) *MPSCIndirectSeq {
+	q := &MPSCIndirectSeq{}
+	q.Init(capacity)
+	return q
+}
+
+// Init initializes a zero-value MPSCIndirectSeq queue in place.
+func (q *MPSCIndirectSeq) Init(capacity int) {
 	if capacity < 2 {
 		panic("lfq: capacity must be >= 2")
 	}
 
 	n := uint64(roundToPow2(capacity))
-	q := &MPSCIndirectSeq{
-		buffer:   make([]mpmc128SeqSlot, n),
-		mask:     n - 1,
-		capacity: n,
-	}
+	q.buffer = make([]mpmc128SeqSlot, n)
+	q.mask = n - 1
+	q.capacity = n
 
 	for i := range n {
 		q.buffer[i].entry.StoreRelaxed(i, 0)
 	}
-
-	return q
 }
 
 // Enqueue adds an element to the queue (multiple producers safe).
@@ -118,22 +121,25 @@ type MPSCPtrSeq struct {
 // NewMPSCPtrSeq creates a new MPSC queue for unsafe.Pointer values.
 // Capacity rounds up to the next power of 2.
 func NewMPSCPtrSeq(capacity int) *MPSCPtrSeq {
+	q := &MPSCPtrSeq{}
+	q.Init(capacity)
+	return q
+}
+
+// Init initializes a zero-value MPSCPtrSeq queue in place.
+func (q *MPSCPtrSeq) Init(capacity int) {
 	if capacity < 2 {
 		panic("lfq: capacity must be >= 2")
 	}
 
 	n := uint64(roundToPow2(capacity))
-	q := &MPSCPtrSeq{
-		buffer:   make([]mpmc128SeqSlot, n),
-		mask:     n - 1,
-		capacity: n,
-	}
+	q.buffer = make([]mpmc128SeqSlot, n)
+	q.mask = n - 1
+	q.capacity = n
 
 	for i := range n {
 		q.buffer[i].entry.StoreRelaxed(i, 0)
 	}
-
-	return q
 }
 
 // Enqueue adds an element (multiple producers safe).
