@@ -1,6 +1,6 @@
-code.hybscloud.com/atomix v0.1.2 h1:Oup07bgNBmIkur8QR9g7Oh71v3Tk0jQ2I8PI7bLUQmI=
-code.hybscloud.com/atomix v0.1.2/go.mod h1:TcdQUe1LNiCehnrjbOs+VlVv0LzYg7XzxW9m6nmPxMg=
-code.hybscloud.com/iox v0.3.3 h1:NTKW7ZM+e2x3Bd3O14nRKuFoVma0/Nix7LerofNUZ1k=
-code.hybscloud.com/iox v0.3.3/go.mod h1:LNxkaP3I0NWbnV2ia5zye8VMrk9kRCGbeIRZR2eGePA=
+code.hybscloud.com/atomix v0.1.3 h1:jVLnRiQ7r1sU1gBBcbDxmqLfdka7BF4zE2q82hQu55s=
+code.hybscloud.com/atomix v0.1.3/go.mod h1:TcdQUe1LNiCehnrjbOs+VlVv0LzYg7XzxW9m6nmPxMg=
+code.hybscloud.com/iox v0.3.4 h1:2FMPyFH/AAkRAru/zKeo2oaIrmZgLdc4QDfVjKhGXCs=
+code.hybscloud.com/iox v0.3.4/go.mod h1:LNxkaP3I0NWbnV2ia5zye8VMrk9kRCGbeIRZR2eGePA=
 code.hybscloud.com/spin v0.1.5 h1:Xxi9mIMFmEl9JbCG8SEUnyfuNMT+6xdPu4twq8EqYK4=
 code.hybscloud.com/spin v0.1.5/go.mod h1:BSOZ7kI43eIPohSVPQXZRf/KJYtRW3gJx82CwyLM64g=

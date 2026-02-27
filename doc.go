@@ -266,6 +266,12 @@
 //
 // Minimum capacity is 2 (already a power of 2). Panic if capacity < 2.
 //
+// FAA-based queues (MPSC, SPMC, MPMC) use a best-effort pre-check before
+// the atomic slot claim. Under high concurrency, up to P−1 additional
+// items (P = number of concurrent producers) may be transiently enqueued
+// beyond Cap(). The 2n physical slot buffer accommodates this safely.
+// Compact (CAS-based) variants enforce a strict capacity bound.
+//
 // Length is intentionally not provided because accurate counts in lock-free
 // algorithms require expensive cross-core synchronization. Track counts in
 // application logic when needed.
