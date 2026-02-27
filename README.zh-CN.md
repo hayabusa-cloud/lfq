@@ -11,7 +11,18 @@ Go 语言的无锁和无等待 FIFO 队列实现。
 
 ## 概述
 
-lfq 提供针对不同生产者/消费者模式优化的有界 FIFO 队列。每种变体使用适合其访问模式的算法。
+`lfq` 包提供了针对不同生产者/消费者模式优化的有界 FIFO 队列。每种变体都使用适合其访问模式的最有效的并发算法，确保在极高竞争下依然保持健壮和可预测的扩展性。
+
+### 理论与背景
+
+`lfq` 建立在经典的并发计算研究之上，提供严格有界的、无锁（Lock-free）和无等待（Wait-free）队列：
+
+- **Lamport 环形缓冲区 (1977)**：驱动我们的单生产者/单消费者 (SPSC) 路径，提供严格的 $O(1)$ 无等待延迟，无需昂贵的原子读-修改-写指令。
+- **Scalable Circular Queue (SCQ, 2019)**：我们的多方 (MPSC, SPMC, MPMC) 路径基于 Ruslan Nikolaev 的 SCQ 算法实现。通过使用硬件 Fetch-And-Add (FAA) 指令代替 CAS 循环，`lfq` 从本质上避免了竞争瓶颈和 ABA 问题，作为独立队列运行，无需外部安全内存回收机制（如 hazard pointers）。
+
+### `iox` 非阻塞 I/O 栈
+
+`lfq` 专为基于 `iox` 的非阻塞 I/O 栈而构建。它避免了隐式运行时阻塞，转而采用显式背压 (Backpressure)。当队列满或空时，它会立即返回 `ErrWouldBlock`。这种简洁的错误模型与事件循环及调用方的退避原语（如 `iox.Backoff`）完美集成，允许可预测的流量管理和亚微秒级的延迟边界。
 
 ```go
 // 直接构造函数（推荐用于大多数场景）
@@ -60,15 +71,15 @@ mv ~/sdk/go ~/sdk/go-atomix
 GOROOT=~/sdk/go-atomix ~/sdk/go-atomix/bin/go build ./...
 ```
 
-内部函数编译器将 atomix 操作内联为正确内存顺序的指令。标准 Go 编译器可用于基本测试，但在高争用情况下可能出现问题。
+内部函数编译器将 `atomix` 操作内联为正确内存顺序的指令。标准 Go 编译器可用于基本测试，但在高争用情况下可能出现问题。
 
 ## 队列类型
 
 | 类型 | 模式 | 进度保证 | 使用场景 |
 |------|------|---------|---------|
 | **SPSC** | 单生产者单消费者 | 无等待 | 流水线阶段、通道 |
-| **MPSC** | 多生产者单消费者 | 无锁 | 事件聚合、日志 |
-| **SPMC** | 单生产者多消费者 | 无锁 | 任务分发 |
+| **MPSC** | 多生产者单消费者 | 无锁（出队无等待） | 事件聚合、日志 |
+| **SPMC** | 单生产者多消费者 | 无锁（入队无等待） | 任务分发 |
 | **MPMC** | 多生产者多消费者 | 无锁 | 通用场景 |
 
 ### 进度保证
@@ -94,7 +105,10 @@ elem, err := q.Dequeue()  // 无等待 O(1)
 
 ### MPSC/SPMC/MPMC: 基于 FAA（默认）
 
-默认情况下，多访问队列使用基于 FAA（Fetch-And-Add）的算法，源自 SCQ（可扩展环形队列）。FAA 盲目递增位置计数器，对于容量 n 需要 2n 个物理槽位，但在高争用情况下比基于 CAS 的替代方案扩展性更好。
+默认情况下，多访问队列基于 SCQ（可扩展环形队列）算法实现，使用 FAA（Fetch-And-Add）指令。FAA 盲目递增位置计数器，对于容量 n 需要 2n 个物理槽位，但在高争用情况下比基于 CAS 的替代方案扩展性更好。
+
+- **权衡**：名义容量为 `n` 时需要 `2n` 个物理槽位。
+- **瞬时容量**：当有 `P` 个并发生产者时，在背压生效前，可能会短暂入队最多 `P-1` 个超过 `Cap()` 的额外元素。
 
 ```go
 // 多生产者，单消费者
@@ -111,7 +125,9 @@ q := lfq.NewMPMC[*Request](4096)  // 基于 FAA 的 SCQ 算法
 
 ### Indirect/Ptr 变体: 128 位原子操作
 
-Indirect 和 Ptr 队列变体（非 SPSC、非 Compact）将序列号和值打包到单个 128 位原子操作中。这减少了缓存行争用，提高了高并发下的吞吐量。
+Indirect 和 Ptr 队列变体（除 Compact Indirect 外的所有非 SPSC 变体）将序列号和载荷打包到单个 128 位原子操作中。这减少了缓存行争用，提高了高并发下的吞吐量。
+
+对于将指针编码到 128 位槽位中的 Ptr 变体（FAA 和 PtrSeq 变体），调用方必须在对象被出队（或已确认被消费）前保留其强类型 Go 引用。不要仅依赖队列中存储的指针位模式作为 GC 可达性根。
 
 ```go
 // Indirect - 每次操作单个 128 位原子
@@ -202,7 +218,11 @@ if lfq.IsWouldBlock(err) {
 
 ## 使用模式
 
+以下模式展示了如何将 `lfq` 集成到并发系统中。通过避免热路径上的内存分配并使用合适的队列变体，您可以大幅降低延迟。
+
 ### 缓冲池
+
+零分配 I/O 的常见模式是预先分配一个缓冲池，并使用无等待的 SPSC 队列跟踪其可用索引。这完全消除了垃圾回收 (GC) 的压力。
 
 ```go
 const poolSize = 1024
@@ -291,7 +311,7 @@ func EnqueueWithRetry(q lfq.Queue[Item], item Item, maxRetries int) bool {
 
 ### 优雅关闭
 
-FAA 基队列（MPMC、SPMC、MPSC）包含防止活锁的阈值机制。在生产者先于消费者结束的优雅关闭场景中，使用 `Drainer` 接口：
+基于 FAA 的多消费者队列（MPMC、SPMC）包含防止活锁的阈值机制。MPSC 也实现 `Drainer`，但仅作为优雅关闭信号（出队不跳过阈值检查）。在生产者先于消费者结束的优雅关闭场景中，使用 `Drainer` 接口：
 
 ```go
 // 生产者协程结束
@@ -302,8 +322,8 @@ if d, ok := q.(lfq.Drainer); ok {
     d.Drain()
 }
 
-// 消费者现在可以在没有阈值阻塞的情况下
-// 消耗所有剩余项目
+// 消费者现在可以消耗所有剩余项目。
+// 对于 MPMC/SPMC，Drain 可避免阈值导致的提前返回。
 for {
     item, err := q.Dequeue()
     if err != nil {
@@ -313,29 +333,29 @@ for {
 }
 ```
 
-`Drain()` 是一个提示 — 调用者必须确保之后不再调用 `Enqueue()`。SPSC 队列没有阈值机制，因此不实现 `Drainer`；类型断言会自然处理这种情况。
+`Drain()` 是一个提示 — 调用者必须确保之后不再调用 `Enqueue()`。对于 MPMC/SPMC，`Drain()` 可避免 `Dequeue` 的阈值提前返回；对于 MPSC，`Drain()` 仅是关闭信号。SPSC 队列不实现 `Drainer`；类型断言会自然处理这种情况。
 
 ## 如何选择队列
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                      有多少生产者？                               │
+│                         有多少生产者？                          │
 │                                                                 │
-│      ┌──────────────────┐          ┌────────────────────┐      │
-│      │    一个 (SPSC/    │          │   多个 (MPMC/      │      │
-│      │    SPMC)          │          │   MPSC)            │      │
-│      └────────┬─────────┘          └─────────┬──────────┘      │
+│      ┌──────────────────┐          ┌────────────────────┐       │
+│      │   一个 (SPSC/    │          │    多个 (MPMC/     │       │
+│      │   SPMC)          │          │    MPSC)           │       │
+│      └────────┬─────────┘          └─────────┬──────────┘       │
 │               │                               │                 │
 │               ▼                               ▼                 │
-│   ┌──────────────────┐              ┌──────────────────┐       │
-│   │ 一个消费者？      │              │ 一个消费者？      │       │
-│   └────────┬─────────┘              └────────┬─────────┘       │
-│    是      │     否                  是      │     否          │
-│     │      │      │                   │      │      │          │
-│     ▼      │      ▼                   ▼      │      ▼          │
-│   SPSC     │    SPMC                MPSC     │    MPMC         │
+│   ┌──────────────────┐              ┌──────────────────┐        │
+│   │ 一个消费者？     │              │ 一个消费者？     │        │
+│   └────────┬─────────┘              └────────┬─────────┘        │
+│    是      │     否                  是      │     否           │
+│     │      │      │                   │      │      │           │
+│     ▼      │      ▼                   ▼      │      ▼           │
+│   SPSC     │    SPMC                MPSC     │    MPMC          │
 │            │                                 │                  │
-└────────────┴─────────────────────────────────┴─────────────────┘
+└────────────┴─────────────────────────────────┴──────────────────┘
 
 变体选择：
 • Generic [T]     → 类型安全，值拷贝语义
@@ -353,6 +373,8 @@ q := lfq.NewMPMC[int](4)     // 实际容量: 4
 q := lfq.NewMPMC[int](1000)  // 实际容量: 1024
 q := lfq.NewMPMC[int](1024)  // 实际容量: 1024
 ```
+
+最小容量为 `2`。当 `capacity < 2` 时，构造函数会 panic。
 
 ## 内存布局
 
@@ -399,8 +421,8 @@ Go 的竞态检测器不适用于无锁算法验证。它跟踪显式同步原�
 
 ## 参考文献
 
-- Nikolaev, R. (2019). A Scalable, Portable, and Memory-Efficient Lock-Free FIFO Queue. *arXiv*, arXiv:1908.04511. https://arxiv.org/abs/1908.04511.
-- Lamport, L. (1974). A New Solution of Dijkstra's Concurrent Programming Problem. *Communications of the ACM*, 17(8), 453–455.
+- Nikolaev, R. (2019). A Scalable, Portable, and Memory-Efficient Lock-Free FIFO Queue. *DISC 2019 (LIPIcs)*. https://doi.org/10.4230/LIPIcs.DISC.2019.28. Preprint: https://arxiv.org/abs/1908.04511.
+- Lamport, L. (1977). Proving the Correctness of Multiprocess Programs. *IEEE Transactions on Software Engineering*, 3(2), 125–143.
 - Vyukov, D. (2010). Bounded MPMC Queue. *1024cores.net*. https://1024cores.net/home/lock-free-algorithms/queues/bounded-mpmc-queue.
 - Herlihy, M. (1991). Wait-Free Synchronization. *ACM Transactions on Programming Languages and Systems*, 13(1), 124–149.
 - Herlihy, M., & Wing, J. M. (1990). Linearizability: A Correctness Condition for Concurrent Objects. *ACM Transactions on Programming Languages and Systems*, 12(3), 463–492.

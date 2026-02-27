@@ -11,7 +11,18 @@ Implementaciones de colas FIFO sin bloqueo y sin espera para Go.
 
 ## Descripción General
 
-lfq proporciona colas FIFO acotadas optimizadas para diferentes patrones de productor/consumidor. Cada variante utiliza el algoritmo adecuado para su patrón de acceso.
+El paquete `lfq` proporciona colas FIFO limitadas libres de bloqueos (lock-free) y libres de esperas (wait-free), optimizadas para diferentes patrones de productor/consumidor (SPSC, MPSC, SPMC, MPMC), garantizando un escalado predecible y sin asignaciones (zero-allocation) bajo alta contención.
+
+### Teoría y Antecedentes
+
+`lfq` se basa en investigaciones fundamentales de concurrencia para superar las limitaciones de los mutex tradicionales y los bucles CAS (Compare-And-Swap):
+
+- **Buffer Circular de Lamport (1977)**: Impulsa nuestras rutas de Productor Único/Consumidor Único (SPSC), ofreciendo una latencia estrictamente de $O(1)$ libre de esperas sin costosas instrucciones atómicas de lectura-modificación-escritura.
+- **Scalable Circular Queue (SCQ, 2019)**: Nuestras rutas multipartitas (MPSC, SPMC, MPMC) están implementadas basándose en el algoritmo SCQ de Ruslan Nikolaev. Al utilizar instrucciones de hardware Fetch-And-Add (FAA) en lugar de bucles CAS, `lfq` evita inherentemente los cuellos de botella por contención y los problemas ABA, operando como una cola independiente sin mecanismos externos de recuperación segura de memoria (ej. hazard pointers).
+
+### Los Stacks de I/O No Bloqueantes de `iox`
+
+`lfq` está diseñado para stacks de I/O no bloqueantes basados en `iox`. Evita el bloqueo implícito en tiempo de ejecución a favor de la contrapresión (backpressure) explícita. Si una cola está llena o vacía, devuelve inmediatamente `ErrWouldBlock`. Este modelo de error conciso se integra perfectamente con bucles de eventos y primitivas de retroceso (como `iox.Backoff`), permitiendo una gestión de tráfico predecible y límites de latencia sub-microsegundos.
 
 ```go
 // Constructor directo (recomendado para la mayoría de casos)
@@ -67,8 +78,8 @@ El compilador de intrínsecos incorpora las operaciones de atomix con el ordenam
 | Tipo | Patrón | Garantía de Progreso | Caso de Uso |
 |------|--------|---------------------|-------------|
 | **SPSC** | Productor Único Consumidor Único | Sin espera | Etapas de pipeline, canales |
-| **MPSC** | Múltiples Productores Consumidor Único | Sin bloqueo | Agregación de eventos, logging |
-| **SPMC** | Productor Único Múltiples Consumidores | Sin bloqueo | Distribución de trabajo |
+| **MPSC** | Múltiples Productores Consumidor Único | Sin bloqueo (dequeue sin espera) | Agregación de eventos, logging |
+| **SPMC** | Productor Único Múltiples Consumidores | Sin bloqueo (enqueue sin espera) | Distribución de trabajo |
 | **MPMC** | Múltiples Productores Múltiples Consumidores | Sin bloqueo | Propósito general |
 
 ### Garantías de Progreso
@@ -94,7 +105,10 @@ elem, err := q.Dequeue()  // Sin espera O(1)
 
 ### MPSC/SPMC/MPMC: Basado en FAA (Predeterminado)
 
-Por defecto, las colas de acceso múltiple usan algoritmos basados en FAA (Fetch-And-Add) derivados de SCQ (Cola Circular Escalable). FAA incrementa ciegamente los contadores de posición, requiriendo 2n slots físicos para capacidad n, pero escala mejor bajo alta contención que las alternativas basadas en CAS.
+Por defecto, las colas de acceso múltiple implementan el algoritmo SCQ (Cola Circular Escalable) utilizando instrucciones FAA (Fetch-And-Add). FAA incrementa ciegamente los contadores de posición, requiriendo 2n slots físicos para capacidad n, pero escala mejor bajo alta contención que las alternativas basadas en CAS.
+
+- **Compensación**: Requiere `2n` slots físicos para una capacidad nominal `n`.
+- **Capacidad transitoria**: Con `P` productores concurrentes, hasta `P-1` elementos adicionales pueden encolarse transitoriamente por encima de `Cap()` antes de que aplique la contrapresión.
 
 ```go
 // Múltiples productores, consumidor único
@@ -111,7 +125,9 @@ La validación de slots basada en ciclos proporciona seguridad ABA sin contadore
 
 ### Variantes Indirect/Ptr: Operaciones Atómicas de 128 bits
 
-Las variantes de cola Indirect y Ptr (no SPSC, no Compact) empaquetan el número de secuencia y el valor en una sola operación atómica de 128 bits. Esto reduce la contención de línea de caché y mejora el rendimiento bajo alta concurrencia.
+Las variantes de cola Indirect y Ptr (todas las variantes no SPSC excepto Compact Indirect) empaquetan el número de secuencia y la carga útil en una sola operación atómica de 128 bits. Esto reduce la contención de línea de caché y mejora el rendimiento bajo alta concurrencia.
+
+Para las variantes Ptr que codifican punteros en slots de 128 bits (variantes FAA y PtrSeq), mantén una referencia Go tipada a los objetos encolados hasta que se desencolen (o se garantice su consumo). No dependas solo de los bits de puntero almacenados en la cola como raíz de alcanzabilidad del GC.
 
 ```go
 // Indirect - una operación atómica de 128 bits por operación
@@ -202,7 +218,11 @@ if lfq.IsWouldBlock(err) {
 
 ## Patrones de Uso
 
-### Pool de Buffers
+Los siguientes patrones demuestran cómo se puede integrar `lfq` en sistemas concurrentes. Al evitar asignaciones en la ruta crítica y utilizar las variantes de cola adecuadas, puede lograr reducciones sustanciales de latencia.
+
+### Pool de Búferes
+
+Un patrón común para I/O sin asignaciones es preasignar un grupo de búferes y rastrear sus índices disponibles utilizando una cola SPSC libre de esperas. Esto elimina por completo la presión del recolector de basura (GC).
 
 ```go
 const poolSize = 1024
@@ -291,7 +311,7 @@ func EnqueueWithRetry(q lfq.Queue[Item], item Item, maxRetries int) bool {
 
 ### Apagado Elegante
 
-Las colas basadas en FAA (MPMC, SPMC, MPSC) incluyen un mecanismo de umbral para prevenir livelock. Para un apagado elegante donde los productores terminan antes que los consumidores, usa la interfaz `Drainer`:
+Las colas FAA con múltiples consumidores (MPMC, SPMC) incluyen un mecanismo de umbral para prevenir livelock. MPSC también implementa `Drainer`, pero solo como señal de apagado elegante (sin salto de umbral en `Dequeue`). Para un apagado elegante donde los productores terminan antes que los consumidores, usa la interfaz `Drainer`:
 
 ```go
 // Las goroutines productoras terminan
@@ -302,8 +322,8 @@ if d, ok := q.(lfq.Drainer); ok {
     d.Drain()
 }
 
-// Los consumidores ahora pueden drenar todos los elementos
-// restantes sin bloqueo por umbral
+// Los consumidores ahora pueden drenar todos los elementos restantes.
+// Para MPMC/SPMC, Drain evita la salida temprana por umbral.
 for {
     item, err := q.Dequeue()
     if err != nil {
@@ -313,7 +333,7 @@ for {
 }
 ```
 
-`Drain()` es una pista — el llamador debe asegurar que no se harán más llamadas a `Enqueue()`. Las colas SPSC no implementan `Drainer` ya que no tienen mecanismo de umbral; la aserción de tipo maneja este caso naturalmente.
+`Drain()` es una pista — el llamador debe asegurar que no se harán más llamadas a `Enqueue()`. Para MPMC/SPMC, `Drain()` evita la salida temprana por umbral en `Dequeue`. Para MPSC, `Drain()` es solo una señal de apagado. Las colas SPSC no implementan `Drainer`; la aserción de tipo maneja este caso naturalmente.
 
 ## Cuándo Usar Cada Cola
 
@@ -353,6 +373,8 @@ q := lfq.NewMPMC[int](4)     // Capacidad real: 4
 q := lfq.NewMPMC[int](1000)  // Capacidad real: 1024
 q := lfq.NewMPMC[int](1024)  // Capacidad real: 1024
 ```
+
+La capacidad mínima es `2`. Los constructores hacen panic si `capacity < 2`.
 
 ## Diseño de Memoria
 
@@ -399,8 +421,8 @@ Ejecute `go test -race ./...` para pruebas seguras ante carreras, o `go test ./.
 
 ## Referencias
 
-- Nikolaev, R. (2019). A Scalable, Portable, and Memory-Efficient Lock-Free FIFO Queue. *arXiv*, arXiv:1908.04511. https://arxiv.org/abs/1908.04511.
-- Lamport, L. (1974). A New Solution of Dijkstra's Concurrent Programming Problem. *Communications of the ACM*, 17(8), 453–455.
+- Nikolaev, R. (2019). A Scalable, Portable, and Memory-Efficient Lock-Free FIFO Queue. *DISC 2019 (LIPIcs)*. https://doi.org/10.4230/LIPIcs.DISC.2019.28. Preprint: https://arxiv.org/abs/1908.04511.
+- Lamport, L. (1977). Proving the Correctness of Multiprocess Programs. *IEEE Transactions on Software Engineering*, 3(2), 125–143.
 - Vyukov, D. (2010). Bounded MPMC Queue. *1024cores.net*. https://1024cores.net/home/lock-free-algorithms/queues/bounded-mpmc-queue.
 - Herlihy, M. (1991). Wait-Free Synchronization. *ACM Transactions on Programming Languages and Systems*, 13(1), 124–149.
 - Herlihy, M., & Wing, J. M. (1990). Linearizability: A Correctness Condition for Concurrent Objects. *ACM Transactions on Programming Languages and Systems*, 12(3), 463–492.

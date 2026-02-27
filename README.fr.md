@@ -11,7 +11,18 @@ Implémentations de files FIFO sans verrou et sans attente pour Go.
 
 ## Aperçu
 
-lfq fournit des files FIFO bornées optimisées pour différents modèles producteur/consommateur. Chaque variante utilise l'algorithme approprié pour son modèle d'accès.
+Le paquet `lfq` fournit des files d'attente FIFO bornées sans verrou (lock-free) et sans attente (wait-free), optimisées pour différents modèles de producteur/consommateur (SPSC, MPSC, SPMC, MPMC), garantissant une mise à l'échelle prévisible et sans allocation sous haute contention.
+
+### Théorie et Contexte
+
+`lfq` s'appuie sur la recherche fondamentale en concurrence pour surmonter les limites des mutex traditionnels et des boucles CAS (Compare-And-Swap) :
+
+- **Tampon Circulaire de Lamport (1977)** : Alimente nos chemins SPSC (Single-Producer/Single-Consumer), offrant une latence strictement $O(1)$ sans attente, sans instructions atomiques de lecture-modification-écriture coûteuses.
+- **Scalable Circular Queue (SCQ, 2019)** : Nos chemins multipartites (MPSC, SPMC, MPMC) sont implémentés sur la base de l'algorithme SCQ de Ruslan Nikolaev. En utilisant des instructions matérielles Fetch-And-Add (FAA) au lieu de boucles CAS, `lfq` évite de manière inhérente les goulots d'étranglement par contention et les problèmes ABA, fonctionnant comme une file d'attente autonome sans mécanismes externes de récupération sécurisée de mémoire (ex. hazard pointers).
+
+### Les Stacks d'I/O Non Bloquantes d'`iox`
+
+`lfq` est conçu pour les stacks d'I/O non bloquantes basées sur `iox`. Il évite le blocage implicite à l'exécution au profit d'une contre-pression (backpressure) explicite. Si une file est pleine ou vide, elle renvoie immédiatement `ErrWouldBlock`. Ce modèle d'erreur concis s'intègre parfaitement aux boucles d'événements et aux primitives de retrait (comme `iox.Backoff`), permettant une gestion prévisible du trafic et des limites de latence sub-microsecondes.
 
 ```go
 // Constructeur direct (recommandé pour la plupart des cas)
@@ -67,8 +78,8 @@ Le compilateur d'intrinsèques intègre les opérations atomix avec l'ordonnance
 | Type | Modèle | Garantie de Progrès | Cas d'Utilisation |
 |------|--------|---------------------|-------------------|
 | **SPSC** | Producteur Unique Consommateur Unique | Sans attente | Étapes de pipeline, canaux |
-| **MPSC** | Producteurs Multiples Consommateur Unique | Sans verrou | Agrégation d'événements, logging |
-| **SPMC** | Producteur Unique Consommateurs Multiples | Sans verrou | Distribution de travail |
+| **MPSC** | Producteurs Multiples Consommateur Unique | Sans verrou (dequeue sans attente) | Agrégation d'événements, logging |
+| **SPMC** | Producteur Unique Consommateurs Multiples | Sans verrou (enqueue sans attente) | Distribution de travail |
 | **MPMC** | Producteurs Multiples Consommateurs Multiples | Sans verrou | Usage général |
 
 ### Garanties de Progrès
@@ -94,7 +105,10 @@ elem, err := q.Dequeue()  // Sans attente O(1)
 
 ### MPSC/SPMC/MPMC: Basé sur FAA (Par Défaut)
 
-Par défaut, les files à accès multiple utilisent des algorithmes basés sur FAA (Fetch-And-Add) dérivés de SCQ (File Circulaire Évolutive). FAA incrémente aveuglément les compteurs de position, nécessitant 2n emplacements physiques pour une capacité n, mais offre une meilleure évolutivité sous haute contention que les alternatives basées sur CAS.
+Par défaut, les files à accès multiple implémentent l'algorithme SCQ (File Circulaire Évolutive) en utilisant des instructions FAA (Fetch-And-Add). FAA incrémente aveuglément les compteurs de position, nécessitant 2n emplacements physiques pour une capacité n, mais offre une meilleure évolutivité sous haute contention que les alternatives basées sur CAS.
+
+- **Compromis** : Nécessite `2n` emplacements physiques pour une capacité nominale `n`.
+- **Capacité transitoire** : Avec `P` producteurs concurrents, jusqu'à `P-1` éléments supplémentaires peuvent être temporairement enfilés au-delà de `Cap()` avant l'application de la contre-pression.
 
 ```go
 // Producteurs multiples, consommateur unique
@@ -111,7 +125,9 @@ La validation d'emplacements basée sur les cycles fournit la sécurité ABA san
 
 ### Variantes Indirect/Ptr: Opérations Atomiques 128 bits
 
-Les variantes de file Indirect et Ptr (non SPSC, non Compact) empaquettent le numéro de séquence et la valeur dans une seule opération atomique de 128 bits. Cela réduit la contention de ligne de cache et améliore le débit sous haute concurrence.
+Les variantes de file Indirect et Ptr (toutes les variantes non SPSC, sauf Compact Indirect) empaquettent le numéro de séquence et la charge utile dans une seule opération atomique de 128 bits. Cela réduit la contention de ligne de cache et améliore le débit sous haute concurrence.
+
+Pour les variantes Ptr qui encodent des pointeurs dans des emplacements 128 bits (variantes FAA et PtrSeq), conservez une référence Go typée vers les objets enfilés jusqu'à leur défilement (ou jusqu'à consommation garantie). Ne vous appuyez pas uniquement sur les bits de pointeur stockés dans la file comme racine d'accessibilité du GC.
 
 ```go
 // Indirect - une opération atomique de 128 bits par opération
@@ -202,7 +218,11 @@ if lfq.IsWouldBlock(err) {
 
 ## Modèles d'Utilisation
 
+Les modèles suivants montrent comment `lfq` peut être intégré dans des systèmes concurrents. En évitant les allocations dans le chemin critique et en utilisant les variantes de file d'attente appropriées, vous pouvez obtenir des réductions de latence substantielles.
+
 ### Pool de Tampons
+
+Un modèle courant pour les E/S sans allocation consiste à préallouer un groupe de tampons et à suivre leurs index disponibles à l'aide d'une file d'attente SPSC sans attente. Cela élimine entièrement la pression du ramasse-miettes (GC).
 
 ```go
 const poolSize = 1024
@@ -291,7 +311,7 @@ func EnqueueWithRetry(q lfq.Queue[Item], item Item, maxRetries int) bool {
 
 ### Arrêt Gracieux
 
-Les files basées sur FAA (MPMC, SPMC, MPSC) incluent un mécanisme de seuil pour prévenir le livelock. Pour un arrêt gracieux où les producteurs terminent avant les consommateurs, utilisez l'interface `Drainer` :
+Les files FAA à consommateurs multiples (MPMC, SPMC) incluent un mécanisme de seuil pour prévenir le livelock. MPSC implémente aussi `Drainer`, mais uniquement comme signal d'arrêt gracieux (pas de saut de seuil dans `Dequeue`). Pour un arrêt gracieux où les producteurs terminent avant les consommateurs, utilisez l'interface `Drainer` :
 
 ```go
 // Les goroutines productrices terminent
@@ -302,8 +322,8 @@ if d, ok := q.(lfq.Drainer); ok {
     d.Drain()
 }
 
-// Les consommateurs peuvent maintenant drainer tous les éléments
-// restants sans blocage par seuil
+// Les consommateurs peuvent maintenant drainer tous les éléments restants.
+// Pour MPMC/SPMC, Drain évite les sorties anticipées dues au seuil.
 for {
     item, err := q.Dequeue()
     if err != nil {
@@ -313,7 +333,7 @@ for {
 }
 ```
 
-`Drain()` est un indice — l'appelant doit s'assurer qu'aucun autre appel à `Enqueue()` ne sera fait. Les files SPSC n'implémentent pas `Drainer` car elles n'ont pas de mécanisme de seuil ; l'assertion de type gère ce cas naturellement.
+`Drain()` est un indice — l'appelant doit s'assurer qu'aucun autre appel à `Enqueue()` ne sera fait. Pour MPMC/SPMC, `Drain()` évite les sorties anticipées dues au seuil dans `Dequeue`. Pour MPSC, `Drain()` est uniquement un signal d'arrêt. Les files SPSC n'implémentent pas `Drainer` ; l'assertion de type gère ce cas naturellement.
 
 ## Quand Utiliser Quelle File
 
@@ -353,6 +373,8 @@ q := lfq.NewMPMC[int](4)     // Capacité réelle : 4
 q := lfq.NewMPMC[int](1000)  // Capacité réelle : 1024
 q := lfq.NewMPMC[int](1024)  // Capacité réelle : 1024
 ```
+
+La capacité minimale est `2`. Les constructeurs panic si `capacity < 2`.
 
 ## Disposition Mémoire
 
@@ -399,8 +421,8 @@ Exécutez `go test -race ./...` pour les tests sûrs, ou `go test ./...` pour to
 
 ## Références
 
-- Nikolaev, R. (2019). A Scalable, Portable, and Memory-Efficient Lock-Free FIFO Queue. *arXiv*, arXiv:1908.04511. https://arxiv.org/abs/1908.04511.
-- Lamport, L. (1974). A New Solution of Dijkstra's Concurrent Programming Problem. *Communications of the ACM*, 17(8), 453–455.
+- Nikolaev, R. (2019). A Scalable, Portable, and Memory-Efficient Lock-Free FIFO Queue. *DISC 2019 (LIPIcs)*. https://doi.org/10.4230/LIPIcs.DISC.2019.28. Preprint: https://arxiv.org/abs/1908.04511.
+- Lamport, L. (1977). Proving the Correctness of Multiprocess Programs. *IEEE Transactions on Software Engineering*, 3(2), 125–143.
 - Vyukov, D. (2010). Bounded MPMC Queue. *1024cores.net*. https://1024cores.net/home/lock-free-algorithms/queues/bounded-mpmc-queue.
 - Herlihy, M. (1991). Wait-Free Synchronization. *ACM Transactions on Programming Languages and Systems*, 13(1), 124–149.
 - Herlihy, M., & Wing, J. M. (1990). Linearizability: A Correctness Condition for Concurrent Objects. *ACM Transactions on Programming Languages and Systems*, 12(3), 463–492.

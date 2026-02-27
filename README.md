@@ -11,7 +11,18 @@ Lock-free and wait-free FIFO queue implementations for Go.
 
 ## Overview
 
-Package `lfq` provides bounded FIFO queues optimized for different producer/consumer patterns. Each variant uses the suitable algorithm for its access pattern.
+Package `lfq` provides lock-free and wait-free bounded FIFO queues optimized for different producer/consumer patterns (SPSC, MPSC, SPMC, MPMC), ensuring predictable, zero-allocation scaling under high contention.
+
+### Theory and Background
+
+`lfq` builds on foundational concurrency research to overcome the limitations of traditional mutexes and CAS (Compare-And-Swap) loops:
+
+- **Lamport Ring Buffer (1977)**: Powers our Single-Producer/Single-Consumer (SPSC) paths, offering strictly $O(1)$ wait-free latency without expensive atomic read-modify-write instructions.
+- **Scalable Circular Queue (SCQ, 2019)**: Our multi-party (MPSC, SPMC, MPMC) paths are implemented based on Ruslan Nikolaev's SCQ algorithm. By utilizing hardware Fetch-And-Add (FAA) instructions instead of CAS loops, `lfq` inherently avoids contention bottlenecks and ABA problems, operating as a standalone queue without external safe memory reclamation (e.g., hazard pointers).
+
+### The `iox` Non-Blocking I/O Stacks
+
+`lfq` is built for `iox`-based non-blocking I/O stacks. It eschews implicit runtime blocking in favor of explicit backpressure. If a queue is full or empty, it immediately returns `ErrWouldBlock`. This concise error model integrates perfectly with event loops and caller-side backoff primitives (like `iox.Backoff`), allowing predictable traffic management and sub-microsecond latency boundaries.
 
 ```go
 // Direct constructor (recommended for most cases)
@@ -67,8 +78,8 @@ The intrinsics compiler inlines `atomix` operations with proper memory ordering.
 | Type | Pattern | Progress Guarantee | Use Case |
 |------|---------|-------------------|----------|
 | **SPSC** | Single-Producer Single-Consumer | Wait-free | Pipeline stages, channels |
-| **MPSC** | Multi-Producer Single-Consumer | Lock-free | Event aggregation, logging |
-| **SPMC** | Single-Producer Multi-Consumer | Lock-free | Work distribution |
+| **MPSC** | Multi-Producer Single-Consumer | Lock-free (wait-free dequeue) | Event aggregation, logging |
+| **SPMC** | Single-Producer Multi-Consumer | Lock-free (wait-free enqueue) | Work distribution |
 | **MPMC** | Multi-Producer Multi-Consumer | Lock-free | General purpose |
 
 ### Progress Guarantees
@@ -94,7 +105,10 @@ elem, err := q.Dequeue()  // Wait-free O(1)
 
 ### MPSC/SPMC/MPMC: FAA-Based (Default)
 
-By default, multi-access queues use FAA (Fetch-And-Add) based algorithms derived from SCQ (Scalable Circular Queue). FAA blindly increments position counters, requiring 2n physical slots for capacity n, but scales better under high contention than CAS-based alternatives.
+By default, multi-access queues implement the SCQ (Scalable Circular Queue) algorithm using FAA (Fetch-And-Add) instructions. FAA blindly increments position counters, requiring 2n physical slots for capacity n, but scales better under high contention than CAS-based alternatives.
+
+- **Trade-off**: Requires `2n` physical slots for nominal capacity `n`.
+- **Transient Capacity**: With `P` concurrent producers, up to `P-1` additional items may be transiently enqueued beyond `Cap()` before backpressure applies.
 
 ```go
 // Multiple producers, single consumer
@@ -111,7 +125,9 @@ Cycle-based slot validation provides ABA safety without epoch counters or hazard
 
 ### Indirect/Ptr Variants: 128-bit Atomic Operations
 
-Indirect and Ptr queue variants (non-SPSC, non-Compact) pack sequence number and value into a single 128-bit atomic. This reduces cache line contention and improves throughput under high concurrency.
+Indirect and Ptr queue variants (all non-SPSC variants except Compact Indirect) pack sequence number and payload into a single 128-bit atomic. This reduces cache line contention and improves throughput under high concurrency.
+
+For Ptr variants that encode pointers into 128-bit slots (FAA and PtrSeq variants), keep a typed Go reference to enqueued objects until they are dequeued (or otherwise guaranteed consumed). Do not rely on queued pointer bits alone as a GC reachability root.
 
 ```go
 // Indirect - single 128-bit atomic per operation
@@ -202,7 +218,11 @@ if lfq.IsWouldBlock(err) {
 
 ## Usage Patterns
 
+The following patterns demonstrate how `lfq` can be integrated into concurrent systems. By avoiding allocations in the hot path and utilizing appropriate queue variants, you can achieve substantial latency reductions.
+
 ### Buffer Pool
+
+A common pattern for zero-allocation I/O is pre-allocating a pool of buffers and tracking their available indices using a wait-free SPSC queue. This eliminates GC pressure entirely.
 
 ```go
 const poolSize = 1024
@@ -291,7 +311,7 @@ func EnqueueWithRetry(q lfq.Queue[Item], item Item, maxRetries int) bool {
 
 ### Graceful Shutdown
 
-FAA-based queues (MPMC, SPMC, MPSC) include a threshold mechanism to prevent livelock. For graceful shutdown where producers finish before consumers, use the `Drainer` interface:
+FAA-based multi-consumer queues (MPMC, SPMC) include a threshold mechanism to prevent livelock. MPSC also implements `Drainer`, but as a graceful-shutdown signal only (no dequeue threshold skip). For graceful shutdown where producers finish before consumers, use the `Drainer` interface:
 
 ```go
 // Producer goroutines finish
@@ -302,8 +322,8 @@ if d, ok := q.(lfq.Drainer); ok {
     d.Drain()
 }
 
-// Consumers can now drain all remaining items
-// without threshold blocking
+// Consumers can now drain all remaining items.
+// For MPMC/SPMC, Drain avoids threshold-based early exit.
 for {
     item, err := q.Dequeue()
     if err != nil {
@@ -313,7 +333,7 @@ for {
 }
 ```
 
-`Drain()` is a hint — the caller must ensure no further `Enqueue()` calls will be made. SPSC queues do not implement `Drainer` as they have no threshold mechanism; the type assertion naturally handles this case.
+`Drain()` is a hint — the caller must ensure no further `Enqueue()` calls will be made. For MPMC/SPMC, `Drain()` avoids threshold-based early exit in `Dequeue`. For MPSC, `Drain()` is a shutdown signal only. SPSC queues do not implement `Drainer`; the type assertion naturally handles this case.
 
 ## When to Use Which Queue
 
@@ -353,6 +373,8 @@ q := lfq.NewMPMC[int](4)     // Actual capacity: 4
 q := lfq.NewMPMC[int](1000)  // Actual capacity: 1024
 q := lfq.NewMPMC[int](1024)  // Actual capacity: 1024
 ```
+
+Minimum capacity is `2`. Constructors panic if `capacity < 2`.
 
 ## Memory Layout
 
@@ -399,8 +421,8 @@ Run `go test -race ./...` for race-safe tests, or `go test ./...` for all tests.
 
 ## References
 
-- Nikolaev, R. (2019). A Scalable, Portable, and Memory-Efficient Lock-Free FIFO Queue. *arXiv*, arXiv:1908.04511. https://arxiv.org/abs/1908.04511.
-- Lamport, L. (1974). A New Solution of Dijkstra's Concurrent Programming Problem. *Communications of the ACM*, 17(8), 453–455.
+- Nikolaev, R. (2019). A Scalable, Portable, and Memory-Efficient Lock-Free FIFO Queue. *DISC 2019 (LIPIcs)*. https://doi.org/10.4230/LIPIcs.DISC.2019.28. Preprint: https://arxiv.org/abs/1908.04511.
+- Lamport, L. (1977). Proving the Correctness of Multiprocess Programs. *IEEE Transactions on Software Engineering*, 3(2), 125–143.
 - Vyukov, D. (2010). Bounded MPMC Queue. *1024cores.net*. https://1024cores.net/home/lock-free-algorithms/queues/bounded-mpmc-queue.
 - Herlihy, M. (1991). Wait-Free Synchronization. *ACM Transactions on Programming Languages and Systems*, 13(1), 124–149.
 - Herlihy, M., & Wing, J. M. (1990). Linearizability: A Correctness Condition for Concurrent Objects. *ACM Transactions on Programming Languages and Systems*, 12(3), 463–492.
