@@ -18,6 +18,13 @@ on:
         default: 'false'
         type: boolean
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: test (${{ matrix.name }})
@@ -29,10 +36,10 @@ jobs:
           # Go 1.26 (minimum required version)
           - name: linux/amd64 (go1.26)
             runs-on: ubuntu-latest
-            go-version: '1.26'
+            go-version: '1.26.x'
           - name: darwin/arm64 (go1.26)
             runs-on: macos-latest
-            go-version: '1.26'
+            go-version: '1.26.x'
           # Latest stable Go
           - name: linux/amd64 (stable)
             runs-on: ubuntu-latest
@@ -41,12 +48,13 @@ jobs:
             runs-on: macos-latest
             go-version: 'stable'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: ${{ matrix.go-version }}
+          cache: true
 
       - name: Verify dependencies
         run: go mod verify
@@ -69,14 +77,14 @@ jobs:
           fi
 
       - name: Run tests with race detector
-        run: go test -race ./...
+        run: go test -timeout 10m -race ./...
 
       - name: Run tests with coverage
-        run: go test -covermode=atomic -coverprofile=coverage.out ./...
+        run: go test -timeout 10m -covermode=atomic -coverprofile=coverage.out ./...
 
       - name: Upload coverage to Codecov
         if: matrix.name == 'linux/amd64 (stable)'
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           files: coverage.out
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -101,12 +109,13 @@ jobs:
           - goos: darwin
             goarch: arm64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
-          go-version: '1.26'
+          go-version: '1.26.x'
+          cache: true
 
       - name: Cross-build
         env:
@@ -114,16 +123,16 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: go build ./...
 
-  # Benchmark with intrinsics compiler (manual trigger or releases)
+  # Benchmark with intrinsics compiler (manual trigger)
   benchmark-intrinsics:
     runs-on: ubuntu-latest
-    if: ${{ github.event.inputs.run_intrinsics_benchmark == 'true' || github.event_name == 'release' }}
+    if: ${{ github.event.inputs.run_intrinsics_benchmark == 'true' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Cache intrinsics compiler
         id: cache-intrinsics
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/go-intrinsics
           key: go-intrinsics-atomix-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
@@ -142,4 +151,4 @@ jobs:
           PATH: ~/go-intrinsics/bin:$PATH
         run: |
           go version
-          go test -bench=. -benchmem ./...
+          go test -timeout 30m -bench=. -benchmem ./...

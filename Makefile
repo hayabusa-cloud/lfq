@@ -99,14 +99,14 @@ build:
 test:
 	$(require-compiler)
 	@echo "Testing lfq with intrinsics compiler..."
-	GOROOT=$(GOROOT_INTRINSIC) $(GO_INTRINSIC) test -v -covermode=atomic -coverprofile=coverage.out ./...
+	GOROOT=$(GOROOT_INTRINSIC) $(GO_INTRINSIC) test -timeout 10m -v -covermode=atomic -coverprofile=coverage.out ./...
 	@echo "Tests passed"
 
 .PHONY: bench
 bench:
 	$(require-compiler)
 	@echo "Running benchmarks with intrinsics compiler..."
-	GOROOT=$(GOROOT_INTRINSIC) $(GO_INTRINSIC) test -bench=. -benchmem ./...
+	GOROOT=$(GOROOT_INTRINSIC) $(GO_INTRINSIC) test -timeout 30m -bench=. -benchmem ./...
 
 # ============================================================================
 # Cross-Compilation (for remote hardware testing)
