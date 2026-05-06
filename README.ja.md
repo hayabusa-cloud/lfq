@@ -192,7 +192,7 @@ q := lfq.New(4096).Compact().BuildIndirect()
 | デフォルト | FAA ベース | 2n | 高競合、スケーラビリティ |
 | コンパクト | CAS ベース | n | メモリ制約 |
 
-SPSC バリアントは既に n スロット（Lamport リングバッファ）を使用しており、Compact() を無視します。Compact() を使用した Indirect キューでは、値は 63 ビットに制限されます。
+SPSC バリアントは既に n スロット（Lamport リングバッファ）を使用しており、Compact() を無視します。Compact() を使用した Indirect キューでは、値は 63 ビットに制限されます。`SPMCCompactIndirect` と `MPMCCompactIndirect` では、並行コンシューマーから観測され得る間、呼び出し側が値の一意性も保証する必要があります。マルチコンシューマーで重複した `uintptr` 値が必要な場合は、デフォルトの Indirect キューを使用してください。
 
 ## 操作
 

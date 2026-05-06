@@ -251,7 +251,8 @@ func ExampleMPSC_eventAggregation() {
 // Example_compactMode demonstrates compact mode for memory-constrained scenarios.
 func Example_compactMode() {
 	// Compact Indirect: 8 bytes per slot (vs 16 bytes standard)
-	// Values limited to 63 bits
+	// Values are limited to 63 bits; multi-consumer compact indirect
+	// queues also require caller-side distinct values while visible.
 	q := lfq.New(1024).Compact().BuildIndirect()
 
 	// Use for buffer pool indices where nil/zero is not needed

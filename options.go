@@ -174,6 +174,9 @@ func BuildMPMC[T any](b *Builder) Queue[T] {
 //   - SPSC (SingleProducer + SingleConsumer) → Lamport ring buffer
 //   - Compact() → CAS-based algorithms (n slots, values limited to 63 bits)
 //   - Default → FAA-based algorithms (2n slots)
+//
+// Compact SPMC/MPMC indirect queues also require caller-side distinct values
+// while values may be observed by concurrent consumers.
 func (b *Builder) BuildIndirect() QueueIndirect {
 	switch {
 	case b.opts.singleProducer && b.opts.singleConsumer:
@@ -214,6 +217,10 @@ func (b *Builder) BuildIndirectMPSC() QueueIndirect {
 }
 
 // BuildIndirectSPMC creates an SPMC queue for uintptr values.
+//
+// With Compact(), the returned compact indirect queue requires caller-side
+// distinct values while values may be observed by concurrent consumers.
+//
 // Panics if builder is not configured with SingleProducer() only.
 func (b *Builder) BuildIndirectSPMC() QueueIndirect {
 	if !b.opts.singleProducer || b.opts.singleConsumer {
@@ -226,6 +233,10 @@ func (b *Builder) BuildIndirectSPMC() QueueIndirect {
 }
 
 // BuildIndirectMPMC creates an MPMC queue for uintptr values.
+//
+// With Compact(), the returned compact indirect queue requires caller-side
+// distinct values while values may be observed by concurrent consumers.
+//
 // Panics if builder has any constraints set.
 func (b *Builder) BuildIndirectMPMC() QueueIndirect {
 	if b.opts.singleProducer || b.opts.singleConsumer {

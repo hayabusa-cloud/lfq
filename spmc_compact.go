@@ -13,6 +13,7 @@ import (
 //
 // Uses round-based empty detection. Single producer writes sequentially,
 // multiple consumers use CAS.
+// Callers must keep concurrently visible values distinct.
 //
 // Memory: 8 bytes per slot
 type SPMCCompactIndirect struct {
@@ -30,6 +31,8 @@ type SPMCCompactIndirect struct {
 // NewSPMCCompactIndirect creates a new compact SPMC queue.
 // Capacity rounds up to the next power of 2.
 // Values are limited to 63 bits (high bit reserved for empty flag).
+// Callers must ensure values are distinct while they may be observed by
+// concurrent consumers.
 func NewSPMCCompactIndirect(capacity int) *SPMCCompactIndirect {
 	q := &SPMCCompactIndirect{}
 	q.Init(capacity)
@@ -60,7 +63,9 @@ func (q *SPMCCompactIndirect) Init(capacity int) {
 }
 
 // Enqueue adds a value (single producer only).
-// Values must fit in 63 bits. Returns ErrWouldBlock if the queue is full.
+// Values must fit in 63 bits and remain distinct from other values that may
+// be observed by concurrent consumers. Returns ErrWouldBlock if the queue is
+// full.
 func (q *SPMCCompactIndirect) Enqueue(elem uintptr) error {
 	if elem&emptyFlag != 0 {
 		panic("lfq: value exceeds 63 bits")

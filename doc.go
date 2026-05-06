@@ -229,6 +229,10 @@
 //	q := lfq.New(4096).Compact().BuildPtr()
 //
 // SPSC variants already use n slots (Lamport ring buffer) and ignore Compact().
+// Compact indirect SPMC/MPMC queues store only the value and empty marker in
+// each slot, so callers must ensure values are distinct while they may be
+// observed by concurrent consumers. Use the default indirect queues when
+// duplicate uintptr values are required under multi-consumer access.
 //
 // # Error Handling
 //
