@@ -192,7 +192,7 @@ q := lfq.New(4096).Compact().BuildIndirect()
 | Default | FAA-based | 2n | High contention, scalability |
 | Compact | CAS-based | n | Memory constrained |
 
-SPSC variants already use n slots (Lamport ring buffer) and ignore Compact(). For Indirect queues with Compact(), values are limited to 63 bits.
+SPSC variants already use n slots (Lamport ring buffer) and ignore Compact(). For Indirect queues with Compact(), values are limited to 63 bits. For `SPMCCompactIndirect` and `MPMCCompactIndirect`, callers must also ensure values are distinct while they may be observed by concurrent consumers; use the default indirect queues when duplicate `uintptr` values are required under multi-consumer access.
 
 ## Operations
 

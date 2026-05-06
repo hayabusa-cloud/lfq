@@ -16,7 +16,8 @@ const emptyFlag = 1 << 63
 //
 // Uses round-based empty detection: empty slots store (emptyFlag | round),
 // filled slots store the value directly. This achieves 8 bytes per slot
-// while allowing any 63-bit value (including zero) to be enqueued.
+// while allowing any 63-bit value (including zero) to be enqueued. Callers
+// must keep concurrently visible values distinct.
 //
 // Memory: 8 bytes per slot
 type MPMCCompactIndirect struct {
@@ -34,6 +35,8 @@ type MPMCCompactIndirect struct {
 // NewMPMCCompactIndirect creates a new compact MPMC queue.
 // Capacity rounds up to the next power of 2.
 // Values are limited to 63 bits (high bit reserved for empty flag).
+// Callers must ensure values are distinct while they may be observed by
+// concurrent consumers.
 func NewMPMCCompactIndirect(capacity int) *MPMCCompactIndirect {
 	q := &MPMCCompactIndirect{}
 	q.Init(capacity)
@@ -65,7 +68,8 @@ func (q *MPMCCompactIndirect) Init(capacity int) {
 
 // Enqueue adds a value to the queue.
 // Returns ErrWouldBlock if the queue is full.
-// Values must fit in 63 bits (high bit must be 0).
+// Values must fit in 63 bits (high bit must be 0) and remain distinct from
+// other values that may be observed by concurrent consumers.
 func (q *MPMCCompactIndirect) Enqueue(elem uintptr) error {
 	if elem&emptyFlag != 0 {
 		panic("lfq: value exceeds 63 bits")

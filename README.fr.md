@@ -192,7 +192,7 @@ q := lfq.New(4096).Compact().BuildIndirect()
 | Par défaut | Basé sur FAA | 2n | Haute contention, évolutivité |
 | Compact | Basé sur CAS | n | Mémoire limitée |
 
-Les variantes SPSC utilisent déjà n emplacements (buffer circulaire de Lamport) et ignorent Compact(). Pour les files Indirect avec Compact(), les valeurs sont limitées à 63 bits.
+Les variantes SPSC utilisent déjà n emplacements (buffer circulaire de Lamport) et ignorent Compact(). Pour les files Indirect avec Compact(), les valeurs sont limitées à 63 bits. Pour `SPMCCompactIndirect` et `MPMCCompactIndirect`, l'appelant doit aussi garantir que les valeurs restent distinctes tant qu'elles peuvent être observées par des consommateurs concurrents; utilisez les files indirectes par défaut lorsque des valeurs `uintptr` dupliquées sont requises avec un accès multi-consommateur.
 
 ## Opérations
 

@@ -192,7 +192,7 @@ q := lfq.New(4096).Compact().BuildIndirect()
 | 默认 | 基于 FAA | 2n | 高争用，可扩展性 |
 | 紧凑 | 基于 CAS | n | 内存受限 |
 
-SPSC 变体已使用 n 个槽位（Lamport 环形缓冲区），会忽略 Compact()。对于使用 Compact() 的 Indirect 队列，值限制为 63 位。
+SPSC 变体已使用 n 个槽位（Lamport 环形缓冲区），会忽略 Compact()。对于使用 Compact() 的 Indirect 队列，值限制为 63 位。对于 `SPMCCompactIndirect` 和 `MPMCCompactIndirect`，调用方还必须确保值在可能被并发消费者观察期间保持互异；如果多消费者访问需要重复的 `uintptr` 值，请使用默认 Indirect 队列。
 
 ## 操作
 

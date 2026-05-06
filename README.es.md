@@ -192,7 +192,7 @@ q := lfq.New(4096).Compact().BuildIndirect()
 | Predeterminado | Basado en FAA | 2n | Alta contención, escalabilidad |
 | Compacto | Basado en CAS | n | Memoria limitada |
 
-Las variantes SPSC ya usan n slots (buffer circular de Lamport) e ignoran Compact(). Para colas Indirect con Compact(), los valores están limitados a 63 bits.
+Las variantes SPSC ya usan n slots (buffer circular de Lamport) e ignoran Compact(). Para colas Indirect con Compact(), los valores están limitados a 63 bits. Para `SPMCCompactIndirect` y `MPMCCompactIndirect`, el llamador también debe asegurar que los valores sean distintos mientras puedan ser observados por consumidores concurrentes; use las colas indirectas predeterminadas cuando se requieran valores `uintptr` duplicados con acceso multi-consumidor.
 
 ## Operaciones
 
