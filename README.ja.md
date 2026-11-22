@@ -41,7 +41,7 @@ q := lfq.Build[Event](lfq.New(1024))                                    // → M
 go get code.hybscloud.com/lfq
 ```
 
-**要件:** Go 1.26+
+**要件:** Go 1.27+
 
 ### コンパイラ要件
 
@@ -49,26 +49,22 @@ go get code.hybscloud.com/lfq
 
 ```bash
 # Makefile を使用（推奨）
-make install-compiler   # ビルド済みリリースをダウンロード（約 30 秒）
+make install-compiler   # Linux の amd64/arm64 または macOS の arm64
 make build              # 内部関数コンパイラでビルド
 make test               # 内部関数コンパイラでテスト
 
-# またはソースからコンパイラをビルド（最新開発版）
+# またはソースからコンパイラをビルド
 make install-compiler-source
 ```
 
-手動インストール：
+どちらのインストールターゲットも、デフォルトでは最新リリースを使用します。特定のリリースを選ぶには、環境変数 `COMPILER_TAG` を設定してください。
+
+手動でインストールする場合は、使用するプラットフォーム用のアーカイブをダウンロードし、同じリリースの `SHA256SUMS` で検証してください。展開した `go` ディレクトリを `$HOME/sdk/${COMPILER_TAG:-go-atomix}` に配置します。[コンパイラのリリース一覧](https://github.com/hayabusa-cloud/go/releases)
 
 ```bash
-# ビルド済みリリース（推奨）
-OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
-URL=$(curl -fsSL https://api.github.com/repos/hayabusa-cloud/go/releases/latest | grep "browser_download_url.*${OS}-${ARCH}\.tar\.gz\"" | cut -d'"' -f4)
-curl -fsSL "$URL" | tar -xz -C ~/sdk
-mv ~/sdk/go ~/sdk/go-atomix
-
-# lfq 依存コードのビルドに使用
-GOROOT=~/sdk/go-atomix ~/sdk/go-atomix/bin/go build ./...
+# lfq を使うアプリケーションをビルド
+compiler="$HOME/sdk/${COMPILER_TAG:-go-atomix}"
+GOTOOLCHAIN=local GOROOT="$compiler" "$compiler/bin/go" build ./...
 ```
 
 内部関数コンパイラは atomix 操作を適切なメモリオーダリングでインライン化します。標準 Go コンパイラは基本的なテストには使用できますが、高競合下では問題が発生する可能性があります。

@@ -41,7 +41,7 @@ q := lfq.Build[Event](lfq.New(1024))                                    // → M
 go get code.hybscloud.com/lfq
 ```
 
-**Requisitos:** Go 1.26+
+**Requisitos:** Go 1.27+
 
 ### Requisito del Compilador
 
@@ -49,26 +49,22 @@ Para un mejor rendimiento, compile con el [compilador Go optimizado con intríns
 
 ```bash
 # Usando Makefile (recomendado)
-make install-compiler   # Descargar versión pre-compilada (~30 segundos)
+make install-compiler   # Linux amd64/arm64 o macOS arm64
 make build              # Compilar con el compilador de intrínsecos
 make test               # Probar con el compilador de intrínsecos
 
-# O compilar desde código fuente (última versión de desarrollo)
+# O compilar desde código fuente
 make install-compiler-source
 ```
 
-Instalación manual:
+Ambos objetivos de instalación usan la última versión publicada de forma predeterminada. Exporte `COMPILER_TAG` para seleccionar una versión concreta.
+
+Para la instalación manual, descargue el archivo para su plataforma y verifíquelo con el archivo `SHA256SUMS` de la misma versión. Coloque el directorio `go` extraído en `$HOME/sdk/${COMPILER_TAG:-go-atomix}`. [Versiones del compilador](https://github.com/hayabusa-cloud/go/releases)
 
 ```bash
-# Versión pre-compilada (recomendada)
-OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
-URL=$(curl -fsSL https://api.github.com/repos/hayabusa-cloud/go/releases/latest | grep "browser_download_url.*${OS}-${ARCH}\.tar\.gz\"" | cut -d'"' -f4)
-curl -fsSL "$URL" | tar -xz -C ~/sdk
-mv ~/sdk/go ~/sdk/go-atomix
-
-# Usar para compilar código dependiente de lfq
-GOROOT=~/sdk/go-atomix ~/sdk/go-atomix/bin/go build ./...
+# Compilar una aplicación que usa lfq
+compiler="$HOME/sdk/${COMPILER_TAG:-go-atomix}"
+GOTOOLCHAIN=local GOROOT="$compiler" "$compiler/bin/go" build ./...
 ```
 
 El compilador de intrínsecos incorpora las operaciones de atomix con el ordenamiento de memoria correcto. El compilador Go estándar funciona para pruebas básicas pero puede presentar problemas bajo alta contención.

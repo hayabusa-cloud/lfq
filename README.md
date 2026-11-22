@@ -41,7 +41,7 @@ q := lfq.Build[Event](lfq.New(1024))                                    // → M
 go get code.hybscloud.com/lfq
 ```
 
-**Requirements:** Go 1.26+
+**Requirements:** Go 1.27+
 
 ### Compiler Requirement
 
@@ -49,26 +49,22 @@ For better performance, compile with the [intrinsics-optimized Go compiler](http
 
 ```bash
 # Using Makefile (recommended)
-make install-compiler   # Download pre-built release (~30 seconds)
+make install-compiler   # Linux amd64/arm64 or macOS arm64
 make build              # Build with intrinsics compiler
 make test               # Test with intrinsics compiler
 
-# Or build compiler from source (bleeding-edge)
+# Or build compiler from source
 make install-compiler-source
 ```
 
-Manual installation:
+Both install targets use the latest release by default. Export `COMPILER_TAG` to select a specific release.
+
+For manual installation, download the archive for your platform and verify it against `SHA256SUMS` from the same release. Place the extracted `go` directory at `$HOME/sdk/${COMPILER_TAG:-go-atomix}`. [Compiler releases](https://github.com/hayabusa-cloud/go/releases)
 
 ```bash
-# Pre-built release (recommended)
-OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
-URL=$(curl -fsSL https://api.github.com/repos/hayabusa-cloud/go/releases/latest | grep "browser_download_url.*${OS}-${ARCH}\.tar\.gz\"" | cut -d'"' -f4)
-curl -fsSL "$URL" | tar -xz -C ~/sdk
-mv ~/sdk/go ~/sdk/go-atomix
-
-# Use for building lfq-dependent code
-GOROOT=~/sdk/go-atomix ~/sdk/go-atomix/bin/go build ./...
+# Build an application that uses lfq
+compiler="$HOME/sdk/${COMPILER_TAG:-go-atomix}"
+GOTOOLCHAIN=local GOROOT="$compiler" "$compiler/bin/go" build ./...
 ```
 
 The intrinsics compiler inlines `atomix` operations with proper memory ordering. The standard Go compiler works for basic testing but may exhibit issues under high contention.
