@@ -57,13 +57,13 @@ make test               # 使用内部函数编译器测试
 make install-compiler-source
 ```
 
-两个安装目标默认使用最新发布的版本。要选择特定版本，请设置环境变量 `COMPILER_TAG`。
+两个安装目标默认使用 Go 1.27.x 系列最新发布的 Atomix 编译器。要选择特定版本，请设置环境变量 `COMPILER_TAG`。查询版本需要 `jq`。从源码构建时，请在 `PATH` 中使用官方 Go 1.27.x 的最新版本。
 
-手动安装时，请下载对应平台的归档文件，用同一版本的 `SHA256SUMS` 校验，然后将解压出的 `go` 目录放在 `$HOME/sdk/${COMPILER_TAG:-go-atomix}`。[编译器发布页](https://github.com/hayabusa-cloud/go/releases)
+手动安装时，请下载对应平台的归档文件，用同一版本的 `SHA256SUMS` 校验，然后将解压出的 `go` 目录放在 `$HOME/sdk/${COMPILER_TAG:-go1.27-atomix}`。[编译器发布页](https://github.com/hayabusa-cloud/go/releases)
 
 ```bash
 # 构建使用 lfq 的应用程序
-compiler="$HOME/sdk/${COMPILER_TAG:-go-atomix}"
+compiler="$HOME/sdk/${COMPILER_TAG:-go1.27-atomix}"
 GOTOOLCHAIN=local GOROOT="$compiler" "$compiler/bin/go" build ./...
 ```
 

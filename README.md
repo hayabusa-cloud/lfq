@@ -57,13 +57,13 @@ make test               # Test with intrinsics compiler
 make install-compiler-source
 ```
 
-Both install targets use the latest release by default. Export `COMPILER_TAG` to select a specific release.
+Both install targets default to the latest published Go 1.27.x Atomix compiler. Export `COMPILER_TAG` to select a specific release. Release discovery requires `jq`. Source builds use the latest stock Go 1.27.x on `PATH`.
 
-For manual installation, download the archive for your platform and verify it against `SHA256SUMS` from the same release. Place the extracted `go` directory at `$HOME/sdk/${COMPILER_TAG:-go-atomix}`. [Compiler releases](https://github.com/hayabusa-cloud/go/releases)
+For manual installation, download the archive for your platform and verify it against `SHA256SUMS` from the same release. Place the extracted `go` directory at `$HOME/sdk/${COMPILER_TAG:-go1.27-atomix}`. [Compiler releases](https://github.com/hayabusa-cloud/go/releases)
 
 ```bash
 # Build an application that uses lfq
-compiler="$HOME/sdk/${COMPILER_TAG:-go-atomix}"
+compiler="$HOME/sdk/${COMPILER_TAG:-go1.27-atomix}"
 GOTOOLCHAIN=local GOROOT="$compiler" "$compiler/bin/go" build ./...
 ```
 

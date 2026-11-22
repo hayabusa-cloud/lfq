@@ -57,13 +57,13 @@ make test               # 内部関数コンパイラでテスト
 make install-compiler-source
 ```
 
-どちらのインストールターゲットも、デフォルトでは最新リリースを使用します。特定のリリースを選ぶには、環境変数 `COMPILER_TAG` を設定してください。
+どちらのインストールターゲットも、デフォルトでは Go 1.27.x 向けの最新の Atomix コンパイラを使用します。特定のリリースを選ぶには、環境変数 `COMPILER_TAG` を設定してください。リリースの検索には `jq` が必要です。ソースからビルドする場合は、公式の Go 1.27.x の最新版を `PATH` に設定してください。
 
-手動でインストールする場合は、使用するプラットフォーム用のアーカイブをダウンロードし、同じリリースの `SHA256SUMS` で検証してください。展開した `go` ディレクトリを `$HOME/sdk/${COMPILER_TAG:-go-atomix}` に配置します。[コンパイラのリリース一覧](https://github.com/hayabusa-cloud/go/releases)
+手動でインストールする場合は、使用するプラットフォーム用のアーカイブをダウンロードし、同じリリースの `SHA256SUMS` で検証してください。展開した `go` ディレクトリを `$HOME/sdk/${COMPILER_TAG:-go1.27-atomix}` に配置します。[コンパイラのリリース一覧](https://github.com/hayabusa-cloud/go/releases)
 
 ```bash
 # lfq を使うアプリケーションをビルド
-compiler="$HOME/sdk/${COMPILER_TAG:-go-atomix}"
+compiler="$HOME/sdk/${COMPILER_TAG:-go1.27-atomix}"
 GOTOOLCHAIN=local GOROOT="$compiler" "$compiler/bin/go" build ./...
 ```
 

@@ -57,13 +57,13 @@ make test               # Tester avec le compilateur d'intrinsèques
 make install-compiler-source
 ```
 
-Les deux cibles d’installation utilisent la dernière version publiée par défaut. Exportez `COMPILER_TAG` pour sélectionner une version précise.
+Les deux cibles d’installation utilisent par défaut la dernière version publiée du compilateur Atomix pour Go 1.27.x. Exportez `COMPILER_TAG` pour sélectionner une version précise. La recherche des versions nécessite `jq`. Pour compiler depuis les sources, utilisez la dernière version officielle de Go 1.27.x dans le `PATH`.
 
-Pour une installation manuelle, téléchargez l’archive de votre plateforme et vérifiez-la à l’aide du fichier `SHA256SUMS` de la même version. Placez le répertoire `go` extrait dans `$HOME/sdk/${COMPILER_TAG:-go-atomix}`. [Versions du compilateur](https://github.com/hayabusa-cloud/go/releases)
+Pour une installation manuelle, téléchargez l’archive de votre plateforme et vérifiez-la à l’aide du fichier `SHA256SUMS` de la même version. Placez le répertoire `go` extrait dans `$HOME/sdk/${COMPILER_TAG:-go1.27-atomix}`. [Versions du compilateur](https://github.com/hayabusa-cloud/go/releases)
 
 ```bash
 # Compiler une application qui utilise lfq
-compiler="$HOME/sdk/${COMPILER_TAG:-go-atomix}"
+compiler="$HOME/sdk/${COMPILER_TAG:-go1.27-atomix}"
 GOTOOLCHAIN=local GOROOT="$compiler" "$compiler/bin/go" build ./...
 ```
 
