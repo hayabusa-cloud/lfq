@@ -1,7 +1,7 @@
 name: CI
 
 # NOTE: This package uses atomix which requires the intrinsics-optimized
-# Go compiler (github.com/hayabusa-cloud/go, branch: atomix) for optimal
+# Go compiler (github.com/hayabusa-cloud/go) for optimal
 # performance. Standard Go compiler is used here for fast CI feedback.
 # See benchmark-intrinsics job for performance validation.
 
@@ -130,25 +130,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Cache intrinsics compiler
-        id: cache-intrinsics
-        uses: actions/cache@v5
-        with:
-          path: ~/go-intrinsics
-          key: go-intrinsics-atomix-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
-
-      - name: Build intrinsics compiler
-        if: steps.cache-intrinsics.outputs.cache-hit != 'true'
-        run: |
-          git clone --depth 1 --branch atomix https://github.com/hayabusa-cloud/go.git ~/go-intrinsics-src
-          cd ~/go-intrinsics-src/src
-          ./make.bash
-          mv ~/go-intrinsics-src ~/go-intrinsics
+      - name: Install the release compiler
+        run: make install-compiler COMPILER_DIR="$RUNNER_TEMP/go-atomix"
 
       - name: Run benchmarks with intrinsics
-        env:
-          GOROOT: ~/go-intrinsics
-          PATH: ~/go-intrinsics/bin:$PATH
-        run: |
-          go version
-          go test -timeout 30m -bench=. -benchmem ./...
+        run: make bench COMPILER_DIR="$RUNNER_TEMP/go-atomix"

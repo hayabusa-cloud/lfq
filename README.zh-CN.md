@@ -49,26 +49,22 @@ go get code.hybscloud.com/lfq
 
 ```bash
 # 使用 Makefile（推荐）
-make install-compiler   # 下载预构建版本（约 30 秒）
+make install-compiler   # Linux 的 amd64/arm64 或 macOS 的 arm64
 make build              # 使用内部函数编译器构建
 make test               # 使用内部函数编译器测试
 
-# 或从源代码构建编译器（最新开发版）
+# 或从源代码构建编译器
 make install-compiler-source
 ```
 
-手动安装：
+两个安装目标默认使用最新发布的版本。要选择特定版本，请设置环境变量 `COMPILER_TAG`。
+
+手动安装时，请下载对应平台的归档文件，用同一版本的 `SHA256SUMS` 校验，然后将解压出的 `go` 目录放在 `$HOME/sdk/${COMPILER_TAG:-go-atomix}`。[编译器发布页](https://github.com/hayabusa-cloud/go/releases)
 
 ```bash
-# 预构建版本（推荐）
-OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
-URL=$(curl -fsSL https://api.github.com/repos/hayabusa-cloud/go/releases/latest | grep "browser_download_url.*${OS}-${ARCH}\.tar\.gz\"" | cut -d'"' -f4)
-curl -fsSL "$URL" | tar -xz -C ~/sdk
-mv ~/sdk/go ~/sdk/go-atomix
-
-# 用于编译依赖 lfq 的代码
-GOROOT=~/sdk/go-atomix ~/sdk/go-atomix/bin/go build ./...
+# 构建使用 lfq 的应用程序
+compiler="$HOME/sdk/${COMPILER_TAG:-go-atomix}"
+GOTOOLCHAIN=local GOROOT="$compiler" "$compiler/bin/go" build ./...
 ```
 
 内部函数编译器将 `atomix` 操作内联为正确内存顺序的指令。标准 Go 编译器可用于基本测试，但在高争用情况下可能出现问题。

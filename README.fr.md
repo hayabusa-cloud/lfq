@@ -49,26 +49,22 @@ Pour de meilleures performances, compilez avec le [compilateur Go optimisé avec
 
 ```bash
 # Utilisation du Makefile (recommandé)
-make install-compiler   # Télécharger la version pré-compilée (~30 secondes)
+make install-compiler   # Linux amd64/arm64 ou macOS arm64
 make build              # Compiler avec le compilateur d'intrinsèques
 make test               # Tester avec le compilateur d'intrinsèques
 
-# Ou compiler depuis les sources (dernière version de développement)
+# Ou compiler depuis les sources
 make install-compiler-source
 ```
 
-Installation manuelle :
+Les deux cibles d’installation utilisent la dernière version publiée par défaut. Exportez `COMPILER_TAG` pour sélectionner une version précise.
+
+Pour une installation manuelle, téléchargez l’archive de votre plateforme et vérifiez-la à l’aide du fichier `SHA256SUMS` de la même version. Placez le répertoire `go` extrait dans `$HOME/sdk/${COMPILER_TAG:-go-atomix}`. [Versions du compilateur](https://github.com/hayabusa-cloud/go/releases)
 
 ```bash
-# Version pré-compilée (recommandée)
-OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
-URL=$(curl -fsSL https://api.github.com/repos/hayabusa-cloud/go/releases/latest | grep "browser_download_url.*${OS}-${ARCH}\.tar\.gz\"" | cut -d'"' -f4)
-curl -fsSL "$URL" | tar -xz -C ~/sdk
-mv ~/sdk/go ~/sdk/go-atomix
-
-# Utiliser pour compiler le code dépendant de lfq
-GOROOT=~/sdk/go-atomix ~/sdk/go-atomix/bin/go build ./...
+# Compiler une application qui utilise lfq
+compiler="$HOME/sdk/${COMPILER_TAG:-go-atomix}"
+GOTOOLCHAIN=local GOROOT="$compiler" "$compiler/bin/go" build ./...
 ```
 
 Le compilateur d'intrinsèques intègre les opérations atomix avec l'ordonnancement mémoire correct. Le compilateur Go standard fonctionne pour les tests de base mais peut présenter des problèmes sous haute contention.
