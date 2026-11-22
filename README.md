@@ -41,7 +41,7 @@ q := lfq.Build[Event](lfq.New(1024))                                    // → M
 go get code.hybscloud.com/lfq
 ```
 
-**Requirements:** Go 1.26+
+**Requirements:** Go 1.27+
 
 ### Compiler Requirement
 
