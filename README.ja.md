@@ -1,11 +1,11 @@
 # lfq
 
 [![Go Reference](https://pkg.go.dev/badge/code.hybscloud.com/lfq.svg)](https://pkg.go.dev/code.hybscloud.com/lfq)
-[![Go Report Card](https://goreportcard.com/badge/github.com/hayabusa-cloud/lfq)](https://goreportcard.com/report/github.com/hayabusa-cloud/lfq)
+[![Benchmarks](https://github.com/hayabusa-cloud/lfq/actions/workflows/benchmarks.yml/badge.svg)](https://github.com/hayabusa-cloud/lfq/actions/workflows/benchmarks.yml)
 [![Codecov](https://codecov.io/gh/hayabusa-cloud/lfq/graph/badge.svg)](https://codecov.io/gh/hayabusa-cloud/lfq)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**言語:** [English](README.md) | [简体中文](README.zh-CN.md) | 日本語 | [Español](README.es.md) | [Français](README.fr.md)
+**言語:** [English](README.md) | [简体中文](README.zh-CN.md) | [Español](README.es.md) | 日本語 | [Français](README.fr.md)
 
 Go 向けのロックフリーおよびウェイトフリー FIFO キュー実装。
 
@@ -22,7 +22,7 @@ Go 向けのロックフリーおよびウェイトフリー FIFO キュー実�
 
 ### `iox` ノンブロッキング I/O スタック
 
-`lfq` は `iox` ベースのノンブロッキング I/O スタック向けに設計されています。暗黙的なランタイムブロッキングを避け、明示的なバックプレッシャーを採用しています。キューが満杯または空の場合、即座に `ErrWouldBlock` を返します。この簡潔なエラーモデルは、イベントループや呼び出し側のバックオフプリミティブ（`iox.Backoff` など）と完全に統合され、予測可能なトラフィック管理とサブマイクロ秒のレイテンシ境界を実現します。
+キュー操作が `ErrWouldBlock` を返したら、イベントループはほかの処理を進めてから再試行できます。同期呼び出しでは `iox.Backoff` で待機できます。
 
 ```go
 // 直接コンストラクタ（ほとんどの場合に推奨）
@@ -68,6 +68,12 @@ GOTOOLCHAIN=local GOROOT="$compiler" "$compiler/bin/go" build ./...
 ```
 
 内部関数コンパイラは atomix 操作を適切なメモリオーダリングでインライン化します。標準 Go コンパイラは基本的なテストには使用できますが、高競合下では問題が発生する可能性があります。
+
+## ベンチマーク
+
+コンパイラをインストールして `make bench-session` を実行すると、`GOMAXPROCS=2` で各ベンチマークを 10 回測定します。`Handoff` は、`sess` が使う容量 4 の SPSC データキューと同じ容量の Go のバッファ付きチャネルで、それぞれ 2 つの goroutine 間で値を 1 個受け渡します。どちらも満杯または空のときは `iox.Backoff` で待機します。`ns/op` は待機時間を含み、`waits/op` は値 1 個を渡す間に送受信側が待機した回数の合計です。
+
+`FullRetry` は、満杯のキューへの挿入が失敗し、値を 1 個取り出してから挿入に成功するまでを単一の goroutine で測定します。すべてのベンチマークを実行するには `make bench` を使います。
 
 ## キュータイプ
 

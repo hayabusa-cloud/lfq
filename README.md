@@ -1,11 +1,11 @@
 # lfq
 
 [![Go Reference](https://pkg.go.dev/badge/code.hybscloud.com/lfq.svg)](https://pkg.go.dev/code.hybscloud.com/lfq)
-[![Go Report Card](https://goreportcard.com/badge/github.com/hayabusa-cloud/lfq)](https://goreportcard.com/report/github.com/hayabusa-cloud/lfq)
+[![Benchmarks](https://github.com/hayabusa-cloud/lfq/actions/workflows/benchmarks.yml/badge.svg)](https://github.com/hayabusa-cloud/lfq/actions/workflows/benchmarks.yml)
 [![Codecov](https://codecov.io/gh/hayabusa-cloud/lfq/graph/badge.svg)](https://codecov.io/gh/hayabusa-cloud/lfq)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**Languages:** English | [简体中文](README.zh-CN.md) | [日本語](README.ja.md) | [Español](README.es.md) | [Français](README.fr.md)
+**Languages:** English | [简体中文](README.zh-CN.md) | [Español](README.es.md) | [日本語](README.ja.md) | [Français](README.fr.md)
 
 Lock-free and wait-free FIFO queue implementations for Go.
 
@@ -22,7 +22,7 @@ Package `lfq` provides lock-free and wait-free bounded FIFO queues optimized for
 
 ### The `iox` Non-Blocking I/O Stacks
 
-`lfq` is built for `iox`-based non-blocking I/O stacks. It eschews implicit runtime blocking in favor of explicit backpressure. If a queue is full or empty, it immediately returns `ErrWouldBlock`. This concise error model integrates perfectly with event loops and caller-side backoff primitives (like `iox.Backoff`), allowing predictable traffic management and sub-microsecond latency boundaries.
+When a queue operation returns `ErrWouldBlock`, an event loop can service other work and retry later. A synchronous caller can wait with `iox.Backoff`.
 
 ```go
 // Direct constructor (recommended for most cases)
@@ -68,6 +68,12 @@ GOTOOLCHAIN=local GOROOT="$compiler" "$compiler/bin/go" build ./...
 ```
 
 The intrinsics compiler inlines `atomix` operations with proper memory ordering. The standard Go compiler works for basic testing but may exhibit issues under high contention.
+
+## Benchmarks
+
+After installing the compiler, run `make bench-session` for ten samples with `GOMAXPROCS=2`. `Handoff` transfers one value between two goroutines through the four-slot SPSC data queue used by `sess` or a buffered Go channel of the same capacity. Both use `iox.Backoff` on a full or empty queue. `ns/op` includes that wait time, and `waits/op` counts waits on both sides per delivered value.
+
+`FullRetry` measures a failed enqueue on a full queue, one dequeue, and a successful retry in a single goroutine. Run `make bench` for the full benchmark suite.
 
 ## Queue Types
 

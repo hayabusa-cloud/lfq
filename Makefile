@@ -14,6 +14,7 @@
 #   make build                   # Build lfq with intrinsics compiler
 #   make test                    # Test lfq with intrinsics compiler
 #   make bench                   # Run benchmarks
+#   make bench-session           # Measure session queue handoff and retry
 
 # Configuration
 export GOTOOLCHAIN := local
@@ -95,11 +96,15 @@ test:
 	GOROOT="$(GOROOT_INTRINSIC)" "$(GO_INTRINSIC)" test -timeout 10m -v -covermode=atomic -coverprofile=coverage.out ./...
 	@echo "Tests passed"
 
-.PHONY: bench
+.PHONY: bench bench-session
 bench:
 	$(require-compiler)
 	@echo "Running benchmarks with intrinsics compiler..."
-	GOROOT="$(GOROOT_INTRINSIC)" "$(GO_INTRINSIC)" test -timeout 30m -bench=. -benchmem ./...
+	GOROOT="$(GOROOT_INTRINSIC)" "$(GO_INTRINSIC)" test -run '^$$' -timeout 30m -bench=. -benchmem ./...
+
+bench-session:
+	$(require-compiler)
+	GOROOT="$(GOROOT_INTRINSIC)" "$(GO_INTRINSIC)" test -run '^$$' -bench '^BenchmarkSPSCSession' -benchmem -benchtime=200ms -count=10 -cpu=2 -timeout=2m .
 
 # ============================================================================
 # Cross-Compilation (for remote hardware testing)
@@ -159,6 +164,7 @@ help:
 	@echo "  build                   Build with intrinsics compiler (includes vet)"
 	@echo "  test                    Run tests with coverage"
 	@echo "  bench                   Run benchmarks"
+	@echo "  bench-session           Measure session queue handoff and retry"
 	@echo ""
 	@echo "Cross-Compilation:"
 	@echo "  test-binary-linux-amd64   Build test binary for linux/amd64"

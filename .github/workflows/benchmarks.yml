@@ -1,0 +1,32 @@
+name: Benchmarks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmarks:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install Atomix Go 1.27.x
+        run: make install-compiler check-compiler COMPILER_DIR="$RUNNER_TEMP/go-atomix"
+
+      - name: Run session queue benchmarks
+        run: |
+          uname -srm
+          make bench-session COMPILER_DIR="$RUNNER_TEMP/go-atomix"

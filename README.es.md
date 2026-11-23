@@ -1,11 +1,11 @@
 # lfq
 
 [![Go Reference](https://pkg.go.dev/badge/code.hybscloud.com/lfq.svg)](https://pkg.go.dev/code.hybscloud.com/lfq)
-[![Go Report Card](https://goreportcard.com/badge/github.com/hayabusa-cloud/lfq)](https://goreportcard.com/report/github.com/hayabusa-cloud/lfq)
+[![Benchmarks](https://github.com/hayabusa-cloud/lfq/actions/workflows/benchmarks.yml/badge.svg)](https://github.com/hayabusa-cloud/lfq/actions/workflows/benchmarks.yml)
 [![Codecov](https://codecov.io/gh/hayabusa-cloud/lfq/graph/badge.svg)](https://codecov.io/gh/hayabusa-cloud/lfq)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**Idiomas:** [English](README.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md) | Español | [Français](README.fr.md)
+**Idiomas:** [English](README.md) | [简体中文](README.zh-CN.md) | Español | [日本語](README.ja.md) | [Français](README.fr.md)
 
 Implementaciones de colas FIFO sin bloqueo y sin espera para Go.
 
@@ -22,7 +22,7 @@ El paquete `lfq` proporciona colas FIFO limitadas libres de bloqueos (lock-free)
 
 ### Los Stacks de I/O No Bloqueantes de `iox`
 
-`lfq` está diseñado para stacks de I/O no bloqueantes basados en `iox`. Evita el bloqueo implícito en tiempo de ejecución a favor de la contrapresión (backpressure) explícita. Si una cola está llena o vacía, devuelve inmediatamente `ErrWouldBlock`. Este modelo de error conciso se integra perfectamente con bucles de eventos y primitivas de retroceso (como `iox.Backoff`), permitiendo una gestión de tráfico predecible y límites de latencia sub-microsegundos.
+Cuando una operación devuelve `ErrWouldBlock`, el bucle de eventos puede atender otras tareas y reintentar más tarde. Quien llama de forma síncrona puede esperar con `iox.Backoff`.
 
 ```go
 // Constructor directo (recomendado para la mayoría de casos)
@@ -68,6 +68,12 @@ GOTOOLCHAIN=local GOROOT="$compiler" "$compiler/bin/go" build ./...
 ```
 
 El compilador de intrínsecos incorpora las operaciones de atomix con el ordenamiento de memoria correcto. El compilador Go estándar funciona para pruebas básicas pero puede presentar problemas bajo alta contención.
+
+## Pruebas de rendimiento
+
+Tras instalar el compilador, ejecuta `make bench-session` para obtener diez muestras con `GOMAXPROCS=2`. `Handoff` transfiere un valor entre dos goroutines mediante la cola de datos SPSC de cuatro posiciones que usa `sess` o un canal de Go con búfer de la misma capacidad. Ambos usan `iox.Backoff` cuando la cola está llena o vacía. `ns/op` incluye el tiempo de espera y `waits/op` cuenta las esperas de ambos extremos por valor entregado.
+
+`FullRetry` mide en una sola goroutine un intento fallido de insertar en una cola llena, una extracción y un nuevo intento de inserción que tiene éxito. Ejecuta `make bench` para medir todos los casos.
 
 ## Tipos de Cola
 

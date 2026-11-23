@@ -1,11 +1,11 @@
 # lfq
 
 [![Go Reference](https://pkg.go.dev/badge/code.hybscloud.com/lfq.svg)](https://pkg.go.dev/code.hybscloud.com/lfq)
-[![Go Report Card](https://goreportcard.com/badge/github.com/hayabusa-cloud/lfq)](https://goreportcard.com/report/github.com/hayabusa-cloud/lfq)
+[![Benchmarks](https://github.com/hayabusa-cloud/lfq/actions/workflows/benchmarks.yml/badge.svg)](https://github.com/hayabusa-cloud/lfq/actions/workflows/benchmarks.yml)
 [![Codecov](https://codecov.io/gh/hayabusa-cloud/lfq/graph/badge.svg)](https://codecov.io/gh/hayabusa-cloud/lfq)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**语言:** [English](README.md) | 简体中文 | [日本語](README.ja.md) | [Español](README.es.md) | [Français](README.fr.md)
+**语言:** [English](README.md) | 简体中文 | [Español](README.es.md) | [日本語](README.ja.md) | [Français](README.fr.md)
 
 Go 语言的无锁和无等待 FIFO 队列实现。
 
@@ -22,7 +22,7 @@ Go 语言的无锁和无等待 FIFO 队列实现。
 
 ### `iox` 非阻塞 I/O 栈
 
-`lfq` 专为基于 `iox` 的非阻塞 I/O 栈而构建。它避免了隐式运行时阻塞，转而采用显式背压 (Backpressure)。当队列满或空时，它会立即返回 `ErrWouldBlock`。这种简洁的错误模型与事件循环及调用方的退避原语（如 `iox.Backoff`）完美集成，允许可预测的流量管理和亚微秒级的延迟边界。
+队列操作返回 `ErrWouldBlock` 时，事件循环可以先处理其他工作，稍后重试。同步调用方可以使用 `iox.Backoff` 等待。
 
 ```go
 // 直接构造函数（推荐用于大多数场景）
@@ -68,6 +68,12 @@ GOTOOLCHAIN=local GOROOT="$compiler" "$compiler/bin/go" build ./...
 ```
 
 内部函数编译器将 `atomix` 操作内联为正确内存顺序的指令。标准 Go 编译器可用于基本测试，但在高争用情况下可能出现问题。
+
+## 基准测试
+
+安装编译器后，运行 `make bench-session`，在 `GOMAXPROCS=2` 下采集十组样本。`Handoff` 在两个 goroutine 之间传递一个值，分别使用 `sess` 的四槽 SPSC 数据队列和相同容量的 Go 缓冲通道。两者在队列满或空时都使用 `iox.Backoff`。`ns/op` 包含等待时间，`waits/op` 表示每传递一个值时两端等待次数之和。
+
+`FullRetry` 在单个 goroutine 中测量向已满队列入队失败、出队一个值并成功重试入队的过程。运行 `make bench` 可执行全部基准测试。
 
 ## 队列类型
 

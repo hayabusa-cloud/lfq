@@ -1,11 +1,11 @@
 # lfq
 
 [![Go Reference](https://pkg.go.dev/badge/code.hybscloud.com/lfq.svg)](https://pkg.go.dev/code.hybscloud.com/lfq)
-[![Go Report Card](https://goreportcard.com/badge/github.com/hayabusa-cloud/lfq)](https://goreportcard.com/report/github.com/hayabusa-cloud/lfq)
+[![Benchmarks](https://github.com/hayabusa-cloud/lfq/actions/workflows/benchmarks.yml/badge.svg)](https://github.com/hayabusa-cloud/lfq/actions/workflows/benchmarks.yml)
 [![Codecov](https://codecov.io/gh/hayabusa-cloud/lfq/graph/badge.svg)](https://codecov.io/gh/hayabusa-cloud/lfq)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**Langues:** [English](README.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md) | [Español](README.es.md) | Français
+**Langues:** [English](README.md) | [简体中文](README.zh-CN.md) | [Español](README.es.md) | [日本語](README.ja.md) | Français
 
 Implémentations de files FIFO sans verrou et sans attente pour Go.
 
@@ -22,7 +22,7 @@ Le paquet `lfq` fournit des files d'attente FIFO bornées sans verrou (lock-free
 
 ### Les Stacks d'I/O Non Bloquantes d'`iox`
 
-`lfq` est conçu pour les stacks d'I/O non bloquantes basées sur `iox`. Il évite le blocage implicite à l'exécution au profit d'une contre-pression (backpressure) explicite. Si une file est pleine ou vide, elle renvoie immédiatement `ErrWouldBlock`. Ce modèle d'erreur concis s'intègre parfaitement aux boucles d'événements et aux primitives de retrait (comme `iox.Backoff`), permettant une gestion prévisible du trafic et des limites de latence sub-microsecondes.
+Lorsqu’une opération renvoie `ErrWouldBlock`, la boucle d’événements peut traiter d’autres tâches avant de réessayer. En mode synchrone, l’appelant peut attendre avec `iox.Backoff`.
 
 ```go
 // Constructeur direct (recommandé pour la plupart des cas)
@@ -68,6 +68,12 @@ GOTOOLCHAIN=local GOROOT="$compiler" "$compiler/bin/go" build ./...
 ```
 
 Le compilateur d'intrinsèques intègre les opérations atomix avec l'ordonnancement mémoire correct. Le compilateur Go standard fonctionne pour les tests de base mais peut présenter des problèmes sous haute contention.
+
+## Mesures de performance
+
+Après avoir installé le compilateur, exécutez `make bench-session` pour obtenir dix échantillons avec `GOMAXPROCS=2`. `Handoff` transmet une valeur entre deux goroutines au moyen de la file de données SPSC à quatre places utilisée par `sess` ou d’un canal Go doté d’un tampon de même capacité. Les deux utilisent `iox.Backoff` quand la file est pleine ou vide. `ns/op` inclut le temps d’attente et `waits/op` compte les attentes des deux côtés pour chaque valeur transmise.
+
+`FullRetry` mesure dans une seule goroutine une tentative d’insertion dans une file pleine, le retrait d’une valeur et la réussite d’une nouvelle tentative d’insertion. Exécutez `make bench` pour lancer tous les benchmarks.
 
 ## Types de Files
 
