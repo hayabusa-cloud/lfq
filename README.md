@@ -224,36 +224,33 @@ The following patterns demonstrate how `lfq` can be integrated into concurrent s
 
 ### Buffer Pool
 
-A common pattern for zero-allocation I/O is pre-allocating a pool of buffers and tracking their available indices using a wait-free SPSC queue. This eliminates GC pressure entirely.
+One goroutine borrows buffers from the pool and one returns them. Each successful `alloc` leaves room in the free list for a return. Call `free` exactly once, after the buffer’s last use.
 
 ```go
 const poolSize = 1024
 const bufSize = 4096
 
-// Pre-allocate buffers
 pool := make([][]byte, poolSize)
+freeList := lfq.NewSPSCIndirect(len(pool))
 for i := range pool {
-    pool[i] = make([]byte, bufSize)
+	pool[i] = make([]byte, bufSize)
+	freeList.Enqueue(uintptr(i))
 }
 
-// Free list tracks available indices
-freeList := lfq.NewSPSCIndirect(poolSize)
-for i := range poolSize {
-    freeList.Enqueue(uintptr(i))
+alloc := func() ([]byte, uintptr, bool) {
+	idx, err := freeList.Dequeue()
+	if err != nil {
+		return nil, 0, false
+	}
+	return pool[idx], idx, true
+}
+free := func(idx uintptr) {
+	freeList.Enqueue(idx)
 }
 
-// Allocate
-func Alloc() ([]byte, uintptr, bool) {
-    idx, err := freeList.Dequeue()
-    if err != nil {
-        return nil, 0, false
-    }
-    return pool[idx], idx, true
-}
-
-// Free
-func Free(idx uintptr) {
-    freeList.Enqueue(idx)
+if buf, idx, ok := alloc(); ok {
+	copy(buf, "hello")
+	free(idx)
 }
 ```
 

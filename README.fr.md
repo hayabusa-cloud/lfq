@@ -224,36 +224,33 @@ Les modèles suivants montrent comment `lfq` peut être intégré dans des syst�
 
 ### Pool de Tampons
 
-Un modèle courant pour les E/S sans allocation consiste à préallouer un groupe de tampons et à suivre leurs index disponibles à l'aide d'une file d'attente SPSC sans attente. Cela élimine entièrement la pression du ramasse-miettes (GC).
+Une seule goroutine emprunte les tampons et une seule les rend. Chaque appel réussi à `alloc` libère une place dans la file. Après la dernière utilisation du tampon, appelez `free` une seule fois pour rendre son indice.
 
 ```go
 const poolSize = 1024
 const bufSize = 4096
 
-// Pré-allouer les tampons
 pool := make([][]byte, poolSize)
+freeList := lfq.NewSPSCIndirect(len(pool))
 for i := range pool {
-    pool[i] = make([]byte, bufSize)
+	pool[i] = make([]byte, bufSize)
+	freeList.Enqueue(uintptr(i))
 }
 
-// La liste libre suit les indices disponibles
-freeList := lfq.NewSPSCIndirect(poolSize)
-for i := range poolSize {
-    freeList.Enqueue(uintptr(i))
+alloc := func() ([]byte, uintptr, bool) {
+	idx, err := freeList.Dequeue()
+	if err != nil {
+		return nil, 0, false
+	}
+	return pool[idx], idx, true
+}
+free := func(idx uintptr) {
+	freeList.Enqueue(idx)
 }
 
-// Allouer
-func Alloc() ([]byte, uintptr, bool) {
-    idx, err := freeList.Dequeue()
-    if err != nil {
-        return nil, 0, false
-    }
-    return pool[idx], idx, true
-}
-
-// Libérer
-func Free(idx uintptr) {
-    freeList.Enqueue(idx)
+if buf, idx, ok := alloc(); ok {
+	copy(buf, "hello")
+	free(idx)
 }
 ```
 

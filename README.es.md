@@ -224,36 +224,33 @@ Los siguientes patrones demuestran cómo se puede integrar `lfq` en sistemas con
 
 ### Pool de Búferes
 
-Un patrón común para I/O sin asignaciones es preasignar un grupo de búferes y rastrear sus índices disponibles utilizando una cola SPSC libre de esperas. Esto elimina por completo la presión del recolector de basura (GC).
+Una sola goroutine toma búferes del pool y una sola los devuelve. Cada llamada a `alloc` que tiene éxito deja sitio en la lista libre. Tras el último uso del búfer, llama a `free` exactamente una vez para devolver su índice.
 
 ```go
 const poolSize = 1024
 const bufSize = 4096
 
-// Pre-asignar buffers
 pool := make([][]byte, poolSize)
+freeList := lfq.NewSPSCIndirect(len(pool))
 for i := range pool {
-    pool[i] = make([]byte, bufSize)
+	pool[i] = make([]byte, bufSize)
+	freeList.Enqueue(uintptr(i))
 }
 
-// Lista libre rastrea índices disponibles
-freeList := lfq.NewSPSCIndirect(poolSize)
-for i := range poolSize {
-    freeList.Enqueue(uintptr(i))
+alloc := func() ([]byte, uintptr, bool) {
+	idx, err := freeList.Dequeue()
+	if err != nil {
+		return nil, 0, false
+	}
+	return pool[idx], idx, true
+}
+free := func(idx uintptr) {
+	freeList.Enqueue(idx)
 }
 
-// Asignar
-func Alloc() ([]byte, uintptr, bool) {
-    idx, err := freeList.Dequeue()
-    if err != nil {
-        return nil, 0, false
-    }
-    return pool[idx], idx, true
-}
-
-// Liberar
-func Free(idx uintptr) {
-    freeList.Enqueue(idx)
+if buf, idx, ok := alloc(); ok {
+	copy(buf, "hello")
+	free(idx)
 }
 ```
 

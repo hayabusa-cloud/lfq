@@ -173,24 +173,21 @@
 //	BuildIndirect() - Queue for uintptr values (pool indices, handles)
 //	BuildPtr()      - Queue for unsafe.Pointer (zero-copy pointer passing)
 //
-// When to use Indirect:
+// Use [SPSCIndirect] to track free buffer indices. One goroutine borrows buffers
+// and one returns them. Return each borrowed index exactly once after its
+// buffer's last use.
 //
-//	// Buffer pool with index-based access
 //	pool := make([][]byte, 1024)
-//	freeList := lfq.NewSPSCIndirect(1024)
-//
-//	// Initialize free list with buffer indices
+//	freeList := lfq.NewSPSCIndirect(len(pool))
 //	for i := range pool {
-//	    pool[i] = make([]byte, 4096)
-//	    freeList.Enqueue(uintptr(i))
+//		pool[i] = make([]byte, 4096)
+//		freeList.Enqueue(uintptr(i))
 //	}
 //
-//	// Allocate: get index from free list
-//	idx, err := freeList.Dequeue()
-//	buf := pool[idx]
-//
-//	// Free: return index to free list
-//	freeList.Enqueue(idx)
+//	if idx, err := freeList.Dequeue(); err == nil {
+//		copy(pool[idx], "hello")
+//		freeList.Enqueue(idx)
+//	}
 //
 // When to use Ptr:
 //

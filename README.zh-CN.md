@@ -224,36 +224,33 @@ if lfq.IsWouldBlock(err) {
 
 ### 缓冲池
 
-零分配 I/O 的常见模式是预先分配一个缓冲池，并使用无等待的 SPSC 队列跟踪其可用索引。这完全消除了垃圾回收 (GC) 的压力。
+由一个 goroutine 借用缓冲区，一个 goroutine 归还。每次 `alloc` 成功都会在空闲队列中腾出一个位置。最后一次使用缓冲区后，调用一次 `free` 归还对应的索引。
 
 ```go
 const poolSize = 1024
 const bufSize = 4096
 
-// 预分配缓冲区
 pool := make([][]byte, poolSize)
+freeList := lfq.NewSPSCIndirect(len(pool))
 for i := range pool {
-    pool[i] = make([]byte, bufSize)
+	pool[i] = make([]byte, bufSize)
+	freeList.Enqueue(uintptr(i))
 }
 
-// 空闲列表追踪可用索引
-freeList := lfq.NewSPSCIndirect(poolSize)
-for i := range poolSize {
-    freeList.Enqueue(uintptr(i))
+alloc := func() ([]byte, uintptr, bool) {
+	idx, err := freeList.Dequeue()
+	if err != nil {
+		return nil, 0, false
+	}
+	return pool[idx], idx, true
+}
+free := func(idx uintptr) {
+	freeList.Enqueue(idx)
 }
 
-// 分配
-func Alloc() ([]byte, uintptr, bool) {
-    idx, err := freeList.Dequeue()
-    if err != nil {
-        return nil, 0, false
-    }
-    return pool[idx], idx, true
-}
-
-// 释放
-func Free(idx uintptr) {
-    freeList.Enqueue(idx)
+if buf, idx, ok := alloc(); ok {
+	copy(buf, "hello")
+	free(idx)
 }
 ```
 

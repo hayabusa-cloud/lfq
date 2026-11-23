@@ -224,36 +224,33 @@ if lfq.IsWouldBlock(err) {
 
 ### バッファプール
 
-ゼロアロケーション I/O の一般的なパターンは、バッファのプールを事前割り当てし、ウェイトフリーな SPSC キューを使用して利用可能なインデックスを追跡することです。これにより、GC の圧力が完全に排除されます。
+バッファの取得と返却は、それぞれ 1 つのゴルーチンが担当します。`alloc` が成功すると、空きリストに返却用の枠が 1 つできます。バッファを使い終えたら、`free` を 1 回だけ呼んでインデックスを返します。
 
 ```go
 const poolSize = 1024
 const bufSize = 4096
 
-// バッファを事前確保
 pool := make([][]byte, poolSize)
+freeList := lfq.NewSPSCIndirect(len(pool))
 for i := range pool {
-    pool[i] = make([]byte, bufSize)
+	pool[i] = make([]byte, bufSize)
+	freeList.Enqueue(uintptr(i))
 }
 
-// フリーリストで利用可能なインデックスを追跡
-freeList := lfq.NewSPSCIndirect(poolSize)
-for i := range poolSize {
-    freeList.Enqueue(uintptr(i))
+alloc := func() ([]byte, uintptr, bool) {
+	idx, err := freeList.Dequeue()
+	if err != nil {
+		return nil, 0, false
+	}
+	return pool[idx], idx, true
+}
+free := func(idx uintptr) {
+	freeList.Enqueue(idx)
 }
 
-// 確保
-func Alloc() ([]byte, uintptr, bool) {
-    idx, err := freeList.Dequeue()
-    if err != nil {
-        return nil, 0, false
-    }
-    return pool[idx], idx, true
-}
-
-// 解放
-func Free(idx uintptr) {
-    freeList.Enqueue(idx)
+if buf, idx, ok := alloc(); ok {
+	copy(buf, "hello")
+	free(idx)
 }
 ```
 

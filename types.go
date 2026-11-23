@@ -80,23 +80,20 @@ type Consumer[T any] interface {
 // The interface intentionally excludes length because accurate counts in
 // lock-free algorithms require expensive cross-core synchronization.
 //
-// Example (buffer pool):
+// In this SPSC pool, one goroutine borrows buffers and one returns them.
+// After the last use of a buffer, return its index exactly once.
 //
 //	pool := make([][]byte, 1024)
-//	freeList := lfq.NewSPSCIndirect(1024)
-//
-//	// Initialize pool
+//	freeList := lfq.NewSPSCIndirect(len(pool))
 //	for i := range pool {
-//	    pool[i] = make([]byte, 4096)
-//	    freeList.Enqueue(uintptr(i))
+//		pool[i] = make([]byte, 4096)
+//		freeList.Enqueue(uintptr(i))
 //	}
 //
-//	// Allocate
-//	idx, _ := freeList.Dequeue()
-//	buf := pool[idx]
-//
-//	// Free
-//	freeList.Enqueue(idx)
+//	if idx, err := freeList.Dequeue(); err == nil {
+//		copy(pool[idx], "hello")
+//		freeList.Enqueue(idx)
+//	}
 type QueueIndirect interface {
 	ProducerIndirect
 	ConsumerIndirect
