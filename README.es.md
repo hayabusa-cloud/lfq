@@ -259,11 +259,13 @@ func Free(idx uintptr) {
 
 ### Agregación de Eventos
 
+El agregador funciona mientras el servicio está activo. Cada productor conserva la lectura actual hasta que la cola la acepta.
+
 ```go
 type Event struct {
-    Source    string
-    Timestamp time.Time
-    Data      any
+	Source    string
+	Timestamp time.Time
+	Data      any
 }
 
 // Múltiples fuentes → Procesador único
@@ -271,44 +273,52 @@ events := lfq.NewMPSC[Event](8192)
 
 // Fuentes de eventos (múltiples productores)
 for sensor := range slices.Values(sensors) {
-    go func(s Sensor) {
-        for reading := range s.Readings() {
-            ev := Event{
-                Source:    s.Name(),
-                Timestamp: time.Now(),
-                Data:      reading,
-            }
-            events.Enqueue(&ev)
-        }
-    }(sensor)
+	go func(s Sensor) {
+		var backoff iox.Backoff
+		for reading := range s.Readings() {
+			ev := Event{
+				Source:    s.Name(),
+				Timestamp: time.Now(),
+				Data:      reading,
+			}
+			for events.Enqueue(&ev) != nil {
+				backoff.Wait()
+			}
+			backoff.Reset()
+		}
+	}(sensor)
 }
 
 // Agregador único (consumidor único)
 go func() {
-    for {
-        ev, err := events.Dequeue()
-        if err == nil {
-            aggregate(ev)
-        }
-    }
+	var backoff iox.Backoff
+	for {
+		ev, err := events.Dequeue()
+		if err != nil {
+			backoff.Wait()
+			continue
+		}
+		backoff.Reset()
+		aggregate(ev)
+	}
 }()
 ```
 
 ### Manejo de Contrapresión
 
-```go
-// Enqueue con reintento y yield
-func EnqueueWithRetry(q lfq.Queue[Item], item Item, maxRetries int) bool {
-	ba := iox.Backoff{}
-    for i := range maxRetries {
-        if q.Enqueue(&item) == nil {
-            return true
-        }
-        ba.Wait() // Ceder para permitir que los consumidores drenen
-    }
-    return false // Aplicar contrapresión al llamador
-}
+En la función auxiliar `func EnqueueWithRetry(q lfq.Queue[Item], item Item, maxAttempts int) bool`, definida por el llamador, el primer intento cuenta para el límite. Si el límite es cero, la función devuelve `false` de inmediato.
 
+```go
+var backoff iox.Backoff
+for attempt := range maxAttempts {
+	if attempt > 0 {
+		backoff.Wait()
+	}
+	if q.Enqueue(&item) == nil {
+		return true
+	}
+}
+return false
 ```
 
 ### Apagado Elegante

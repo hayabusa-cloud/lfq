@@ -259,11 +259,13 @@ func Free(idx uintptr) {
 
 ### イベント集約
 
+集約処理はサービスの稼働中、動作し続けます。各プロデューサーは、キューへの追加に成功するまで同じ測定値を保持します。
+
 ```go
 type Event struct {
-    Source    string
-    Timestamp time.Time
-    Data      any
+	Source    string
+	Timestamp time.Time
+	Data      any
 }
 
 // 複数ソース → 単一プロセッサ
@@ -271,44 +273,52 @@ events := lfq.NewMPSC[Event](8192)
 
 // イベントソース（複数プロデューサー）
 for sensor := range slices.Values(sensors) {
-    go func(s Sensor) {
-        for reading := range s.Readings() {
-            ev := Event{
-                Source:    s.Name(),
-                Timestamp: time.Now(),
-                Data:      reading,
-            }
-            events.Enqueue(&ev)
-        }
-    }(sensor)
+	go func(s Sensor) {
+		var backoff iox.Backoff
+		for reading := range s.Readings() {
+			ev := Event{
+				Source:    s.Name(),
+				Timestamp: time.Now(),
+				Data:      reading,
+			}
+			for events.Enqueue(&ev) != nil {
+				backoff.Wait()
+			}
+			backoff.Reset()
+		}
+	}(sensor)
 }
 
 // 単一アグリゲーター（単一コンシューマー）
 go func() {
-    for {
-        ev, err := events.Dequeue()
-        if err == nil {
-            aggregate(ev)
-        }
-    }
+	var backoff iox.Backoff
+	for {
+		ev, err := events.Dequeue()
+		if err != nil {
+			backoff.Wait()
+			continue
+		}
+		backoff.Reset()
+		aggregate(ev)
+	}
 }()
 ```
 
 ### バックプレッシャー処理
 
-```go
-// リトライとyieldによるエンキュー
-func EnqueueWithRetry(q lfq.Queue[Item], item Item, maxRetries int) bool {
-	ba := iox.Backoff{}
-    for i := range maxRetries {
-        if q.Enqueue(&item) == nil {
-            return true
-        }
-        ba.Wait() // コンシューマーにドレインを許可
-    }
-    return false // 呼び出し元にバックプレッシャーを適用
-}
+呼び出し側で定義する `func EnqueueWithRetry(q lfq.Queue[Item], item Item, maxAttempts int) bool` では、初回の試行も `maxAttempts` に含まれます。上限がゼロの場合は直ちに `false` を返します。
 
+```go
+var backoff iox.Backoff
+for attempt := range maxAttempts {
+	if attempt > 0 {
+		backoff.Wait()
+	}
+	if q.Enqueue(&item) == nil {
+		return true
+	}
+}
+return false
 ```
 
 ### グレースフルシャットダウン

@@ -259,11 +259,13 @@ func Free(idx uintptr) {
 
 ### 事件聚合
 
+聚合器在服务运行期间持续工作。每个生产者保留当前读数，直到成功入队。
+
 ```go
 type Event struct {
-    Source    string
-    Timestamp time.Time
-    Data      any
+	Source    string
+	Timestamp time.Time
+	Data      any
 }
 
 // 多源 → 单处理器
@@ -271,44 +273,52 @@ events := lfq.NewMPSC[Event](8192)
 
 // 事件源（多生产者）
 for sensor := range slices.Values(sensors) {
-    go func(s Sensor) {
-        for reading := range s.Readings() {
-            ev := Event{
-                Source:    s.Name(),
-                Timestamp: time.Now(),
-                Data:      reading,
-            }
-            events.Enqueue(&ev)
-        }
-    }(sensor)
+	go func(s Sensor) {
+		var backoff iox.Backoff
+		for reading := range s.Readings() {
+			ev := Event{
+				Source:    s.Name(),
+				Timestamp: time.Now(),
+				Data:      reading,
+			}
+			for events.Enqueue(&ev) != nil {
+				backoff.Wait()
+			}
+			backoff.Reset()
+		}
+	}(sensor)
 }
 
 // 单聚合器（单消费者）
 go func() {
-    for {
-        ev, err := events.Dequeue()
-        if err == nil {
-            aggregate(ev)
-        }
-    }
+	var backoff iox.Backoff
+	for {
+		ev, err := events.Dequeue()
+		if err != nil {
+			backoff.Wait()
+			continue
+		}
+		backoff.Reset()
+		aggregate(ev)
+	}
 }()
 ```
 
 ### 背压处理
 
-```go
-// 带重试和让步的入队
-func EnqueueWithRetry(q lfq.Queue[Item], item Item, maxRetries int) bool {
-	ba := iox.Backoff{}
-    for i := range maxRetries {
-        if q.Enqueue(&item) == nil {
-            return true
-        }
-        ba.Wait() // 让步以允许消费者消耗
-    }
-    return false // 对调用者施加背压
-}
+调用方可定义 `func EnqueueWithRetry(q lfq.Queue[Item], item Item, maxAttempts int) bool`。首次入队也计入 `maxAttempts`，上限为零时立即返回 `false`。
 
+```go
+var backoff iox.Backoff
+for attempt := range maxAttempts {
+	if attempt > 0 {
+		backoff.Wait()
+	}
+	if q.Enqueue(&item) == nil {
+		return true
+	}
+}
+return false
 ```
 
 ### 优雅关闭

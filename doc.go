@@ -83,19 +83,27 @@
 //	// Multiple producers (event sources)
 //	for sensor := range slices.Values(sensors) {
 //	    go func(s Sensor) {
+//	        var backoff iox.Backoff
 //	        for ev := range s.Events() {
-//	            q.Enqueue(&ev)
+//	            for q.Enqueue(&ev) != nil {
+//	                backoff.Wait()
+//	            }
+//	            backoff.Reset()
 //	        }
 //	    }(sensor)
 //	}
 //
 //	// Single consumer (aggregator)
 //	go func() {
+//	    var backoff iox.Backoff
 //	    for {
 //	        ev, err := q.Dequeue()
-//	        if err == nil {
-//	            aggregate(ev)
+//	        if err != nil {
+//	            backoff.Wait()
+//	            continue
 //	        }
+//	        backoff.Reset()
+//	        aggregate(ev)
 //	    }
 //	}()
 //
@@ -118,11 +126,15 @@
 //	// Multiple consumers (workers)
 //	for range numWorkers {
 //	    go func() {
+//	        var backoff iox.Backoff
 //	        for {
 //	            task, err := q.Dequeue()
-//	            if err == nil {
-//	                task.Execute()
+//	            if err != nil {
+//	                backoff.Wait()
+//	                continue
 //	            }
+//	            backoff.Reset()
+//	            task.Execute()
 //	        }
 //	    }()
 //	}
@@ -135,11 +147,15 @@
 //	// Workers
 //	for range numWorkers {
 //	    go func() {
+//	        var backoff iox.Backoff
 //	        for {
 //	            job, err := q.Dequeue()
-//	            if err == nil {
-//	                job.Run()
+//	            if err != nil {
+//	                backoff.Wait()
+//	                continue
 //	            }
+//	            backoff.Reset()
+//	            job.Run()
 //	        }
 //	    }()
 //	}
