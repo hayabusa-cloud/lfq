@@ -324,28 +324,28 @@ return false
 
 ### Graceful Shutdown
 
-The generic FAA MPMC and FAA SPMC queues use a dequeue threshold. `Drain` disables that threshold after production ends. `MPMCIndirect` and `MPMCPtr` can always drain their published values.
+To drain a batch from a freshly initialized queue, wait for every producer's final `Enqueue()` to return. Call `Drain()` if the queue supports it. A single consumer then makes the first `Dequeue()` call and continues until `ErrWouldBlock`.
 
 ```go
 // Producer goroutines finish
 prodWg.Wait()
 
-// Signal no more enqueues will occur
-if d, ok := q.(lfq.Drainer); ok {
-    d.Drain()
+// For a queue value initialized with Init, use its address as q.
+if d, ok := any(q).(lfq.Drainer); ok {
+	d.Drain()
 }
 
 // Dequeue until the queue reports empty.
 for {
-    item, err := q.Dequeue()
-    if err != nil {
-        break
-    }
-    process(item)
+	item, err := q.Dequeue()
+	if err != nil {
+		break
+	}
+	process(item)
 }
 ```
 
-`Drain()` is a hint — the caller must ensure no further `Enqueue()` calls will be made. For queues with a dequeue threshold, `Drain()` avoids threshold-based early exit in `Dequeue`. For MPSC, `Drain()` is a shutdown signal only. SPSC queues do not implement `Drainer`; the type assertion naturally handles this case.
+`Drain()` disables the dequeue threshold on the generic FAA MPMC queue and the FAA SPMC queues. On FAA MPSC queues it signals the end of production. `MPMCIndirect` and `MPMCPtr` implement `Drain()` as a no-op. SPSC queues drain directly.
 
 ## When to Use Which Queue
 

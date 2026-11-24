@@ -324,28 +324,28 @@ return false
 
 ### Arrêt Gracieux
 
-Les files MPMC génériques et SPMC basées sur FAA utilisent un seuil de retrait. `Drain` désactive ce seuil à la fin de la production. Les valeurs publiées dans `MPMCIndirect` et `MPMCPtr` peuvent toujours être retirées.
+Pour vider un lot dans une file fraîchement initialisée, attendez le retour du dernier appel à `Enqueue()` de chaque producteur. Appelez `Drain()` si la file le permet. Un seul consommateur effectue alors le premier appel à `Dequeue()` et poursuit les retraits jusqu’à recevoir `ErrWouldBlock`.
 
 ```go
 // Les goroutines productrices terminent
 prodWg.Wait()
 
-// Signaler qu'il n'y aura plus d'enqueues
-if d, ok := q.(lfq.Drainer); ok {
-    d.Drain()
+// Si vous avez initialisé la file avec Init, utilisez son adresse comme q.
+if d, ok := any(q).(lfq.Drainer); ok {
+	d.Drain()
 }
 
 // Retirer les éléments jusqu’à ce que la file se déclare vide.
 for {
-    item, err := q.Dequeue()
-    if err != nil {
-        break
-    }
-    process(item)
+	item, err := q.Dequeue()
+	if err != nil {
+		break
+	}
+	process(item)
 }
 ```
 
-`Drain()` est un indice — l'appelant doit s'assurer qu'aucun autre appel à `Enqueue()` ne sera fait. Pour les files dotées d’un seuil de retrait, `Drain()` évite les sorties anticipées dues au seuil dans `Dequeue`. Pour MPSC, `Drain()` est uniquement un signal d'arrêt. Les files SPSC n'implémentent pas `Drainer` ; l'assertion de type gère ce cas naturellement.
+Dans les variantes fondées sur FAA, `Drain()` désactive le seuil de retrait de la file MPMC générique et des files SPMC. Dans les files MPSC fondées sur FAA, il signale la fin de la production. Dans `MPMCIndirect` et `MPMCPtr`, l’appel à `Drain()` est sans effet. Les files SPSC se vident directement.
 
 ## Quand Utiliser Quelle File
 

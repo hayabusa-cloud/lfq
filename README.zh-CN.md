@@ -324,28 +324,28 @@ return false
 
 ### 优雅关闭
 
-基于 FAA 的泛型 MPMC 队列和 SPMC 队列使用出队阈值。生产结束后，`Drain` 会禁用该阈值。`MPMCIndirect` 和 `MPMCPtr` 中已发布的值始终可以取出。
+要从新初始化的队列中取出一批数据，先等待每个生产者的最后一次 `Enqueue()` 调用返回。如果队列支持 `Drain()`，此时调用它。随后由一个消费者首次调用 `Dequeue()`，并继续出队，直到收到 `ErrWouldBlock`。
 
 ```go
 // 生产者协程结束
 prodWg.Wait()
 
-// 通知不再有入队操作
-if d, ok := q.(lfq.Drainer); ok {
-    d.Drain()
+// 如果用 Init 初始化了队列变量，请用该变量的地址作为 q。
+if d, ok := any(q).(lfq.Drainer); ok {
+	d.Drain()
 }
 
 // 持续出队，直到队列报告为空。
 for {
-    item, err := q.Dequeue()
-    if err != nil {
-        break
-    }
-    process(item)
+	item, err := q.Dequeue()
+	if err != nil {
+		break
+	}
+	process(item)
 }
 ```
 
-`Drain()` 是一个提示 — 调用者必须确保之后不再调用 `Enqueue()`。对于使用出队阈值的队列，`Drain()` 可避免 `Dequeue` 的阈值提前返回；对于 MPSC，`Drain()` 仅是关闭信号。SPSC 队列不实现 `Drainer`；类型断言会自然处理这种情况。
+`Drain()` 会禁用基于 FAA 的泛型 MPMC 队列和 SPMC 队列的出队阈值。在基于 FAA 的 MPSC 队列中，它表示生产已经结束。对 `MPMCIndirect` 和 `MPMCPtr` 调用 `Drain()` 没有任何效果。SPSC 队列可以直接出队。
 
 ## 如何选择队列
 

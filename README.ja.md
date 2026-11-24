@@ -324,28 +324,28 @@ return false
 
 ### グレースフルシャットダウン
 
-FAA を使うジェネリック MPMC キューと SPMC キューは、取り出し時に閾値を使います。生産終了後に `Drain` を呼ぶと閾値が無効になります。`MPMCIndirect` と `MPMCPtr` では、公開済みの値を常に取り出せます。
+新しく初期化したキューからバッチを取り出すときは、まずすべてのプロデューサーの最後の `Enqueue()` 呼び出しが戻るのを待ちます。キューが対応していれば `Drain()` を呼びます。その後、1 つのコンシューマーが初めて `Dequeue()` を呼び、`ErrWouldBlock` が返るまで取り出しを続けます。
 
 ```go
 // プロデューサーゴルーチンが終了
 prodWg.Wait()
 
-// これ以上エンキューしないことを通知
-if d, ok := q.(lfq.Drainer); ok {
-    d.Drain()
+// キュー変数を Init で初期化した場合は、そのアドレスを q として使う。
+if d, ok := any(q).(lfq.Drainer); ok {
+	d.Drain()
 }
 
 // キューが空を返すまでデキューする。
 for {
-    item, err := q.Dequeue()
-    if err != nil {
-        break
-    }
-    process(item)
+	item, err := q.Dequeue()
+	if err != nil {
+		break
+	}
+	process(item)
 }
 ```
 
-`Drain()` はヒントです — 呼び出し元は以降 `Enqueue()` を呼び出さないことを保証する必要があります。取り出し時の閾値を使うキューでは `Drain()` により `Dequeue` の閾値起因の早期終了を回避できます。MPSC では `Drain()` は終了通知のみです。SPSC キューは `Drainer` を実装しません。型アサーションがこのケースを自然に処理します。
+FAA を使うジェネリック MPMC キューと SPMC キューでは、`Drain()` が取り出し時の閾値を無効にします。FAA を使う MPSC キューでは生産の終了を通知します。`MPMCIndirect` と `MPMCPtr` では `Drain()` を呼んでも何も起きません。SPSC キューからは直接取り出せます。
 
 ## キュー選択ガイド
 

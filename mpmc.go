@@ -106,9 +106,7 @@ func (q *MPMC[T]) Enqueue(elem *T) error {
 	}
 }
 
-// Drain signals that no more enqueues will occur.
-// After Drain is called, Dequeue skips the threshold check to allow
-// consumers to drain all remaining items without producer pressure.
+// Drain disables the dequeue threshold after all producers finish. See [Drainer].
 func (q *MPMC[T]) Drain() {
 	q.draining.StoreRelease(true)
 }
