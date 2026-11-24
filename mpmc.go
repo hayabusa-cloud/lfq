@@ -10,6 +10,8 @@ import (
 )
 
 // MPMC is an FAA-based multi-producer multi-consumer bounded queue.
+// When sharing the queue, follow the batch protocol in [Drainer].
+// Use [MPMCSeq] for live polling or concurrent consumers.
 //
 // Based on the SCQ (Scalable Circular Queue) algorithm by Nikolaev (DISC 2019).
 // Uses Fetch-And-Add to blindly increment position counters, requiring 2n

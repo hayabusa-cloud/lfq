@@ -29,7 +29,7 @@ func Example_workerPool() {
 	}
 
 	// Job queue and results
-	jobs := lfq.NewMPMC[Job](16)
+	jobs := lfq.NewMPMCSeq[Job](16)
 	results := make([]int, 5)
 	var wg sync.WaitGroup
 	var completed atomix.Int32

@@ -15,26 +15,32 @@
 //   - SPMC: Single-Producer Multi-Consumer
 //   - MPMC: Multi-Producer Multi-Consumer
 //
+// For [MPSC], [MPSCIndirect] and [MPSCPtr], size the queue for the maximum
+// number of simultaneous Enqueue calls, including calls from paused producers.
+// Shared [MPMC], [SPMC], [SPMCIndirect] and [SPMCPtr] queues require the
+// fresh-batch protocol in [Drainer]. For live polling or concurrent consumers,
+// use [MPMCSeq], [SPMCSeq], [SPMCIndirectSeq] or [SPMCPtrSeq], respectively.
+//
 // # Quick Start
 //
 // Direct constructors (recommended for most cases):
 //
 //	q := lfq.NewSPSC[Event](1024)
-//	q := lfq.NewMPMC[*Request](4096)
+//	q := lfq.NewMPMCSeq[*Request](4096)
 //
 // Builder API auto-selects algorithm based on constraints:
 //
 //	q := lfq.Build[Event](lfq.New(1024).SingleProducer().SingleConsumer())  // → SPSC
 //	q := lfq.Build[Event](lfq.New(1024).SingleConsumer())                   // → MPSC
-//	q := lfq.Build[Event](lfq.New(1024).SingleProducer())                   // → SPMC
-//	q := lfq.Build[Event](lfq.New(1024))                                    // → MPMC
+//	q := lfq.Build[Event](lfq.New(1024).SingleProducer().Compact())         // → SPMCSeq
+//	q := lfq.Build[Event](lfq.New(1024).Compact())                          // → MPMCSeq
 //
 // # Basic Usage
 //
 // All queues share the same interface for enqueueing and dequeueing:
 //
 //	// Create a queue
-//	q := lfq.NewMPMC[int](1024)
+//	q := lfq.NewSPSC[int](1024)
 //
 //	// Enqueue (non-blocking)
 //	err := q.Enqueue(new(42))
@@ -81,7 +87,7 @@
 // Event Aggregation (MPSC):
 //
 //	// Multiple event sources → Single processor
-//	q := lfq.NewMPSC[Event](4096)
+//	q := lfq.NewMPSC[Event](max(4096, len(sensors)))
 //
 //	// Multiple producers (event sources)
 //	for sensor := range slices.Values(sensors) {
@@ -113,7 +119,7 @@
 // Work Distribution (SPMC):
 //
 //	// Single dispatcher → Multiple workers
-//	q := lfq.NewSPMC[Task](1024)
+//	q := lfq.NewSPMCSeq[Task](1024)
 //
 //	// Single producer (dispatcher)
 //	go func() {
@@ -145,7 +151,7 @@
 // Worker Pool (MPMC):
 //
 //	// Multiple submitters → Multiple workers
-//	q := lfq.NewMPMC[Job](4096)
+//	q := lfq.NewMPMCSeq[Job](4096)
 //
 //	// Workers
 //	for range numWorkers {
@@ -290,7 +296,7 @@
 //
 // # Thread Safety
 //
-// All queue operations are thread-safe within their access pattern constraints:
+// Each concrete queue's caller contract applies within its topology:
 //
 //   - SPSC: One producer goroutine, one consumer goroutine
 //   - MPSC: Multiple producer goroutines, one consumer goroutine

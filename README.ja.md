@@ -31,8 +31,8 @@ q := lfq.NewSPSC[Event](1024)
 // Builder API - 制約に基づいてアルゴリズムを自動選択
 q := lfq.Build[Event](lfq.New(1024).SingleProducer().SingleConsumer())  // → SPSC
 q := lfq.Build[Event](lfq.New(1024).SingleConsumer())                   // → MPSC
-q := lfq.Build[Event](lfq.New(1024).SingleProducer())                   // → SPMC
-q := lfq.Build[Event](lfq.New(1024))                                    // → MPMC
+q := lfq.Build[Event](lfq.New(1024).SingleProducer().Compact())         // → SPMCSeq
+q := lfq.Build[Event](lfq.New(1024).Compact())                          // → MPMCSeq
 ```
 
 ## インストール
@@ -71,7 +71,7 @@ Atomix コンパイラは `atomix` の操作をインライン化します。CI 
 
 ## ベンチマーク
 
-CI では Linux の amd64 と arm64 の実機で、Atomix コンパイラと `GOMAXPROCS=2` を使って `make bench-ci` を実行します。Actions のサマリーには、セッションの受け渡しと再試行、4 種類のキューそれぞれの enqueue/dequeue の組、複数のコンシューマが並行して取り出す SPMC について、各 10 回の測定の中央値を表示します。測定の生データはアーティファクトから取得できます。
+CI では Linux の amd64 と arm64 の実機で、Atomix コンパイラと `GOMAXPROCS=2` を使って `make bench-ci` を実行します。Actions のサマリーには、セッションの受け渡しと再試行、4 種類のキューそれぞれの enqueue/dequeue の組、複数のコンシューマが並行して取り出す `SPMCIndirectSeq` について、各 10 回の測定の中央値を表示します。測定の生データはアーティファクトから取得できます。
 
 `Handoff` は、`sess` が使う容量 4 の SPSC データキューと同じ容量の Go のバッファ付きチャネルで、それぞれ 2 つの goroutine 間で値を 1 個受け渡します。どちらも満杯または空のときは `iox.Backoff` で待機します。`ns/op` は待機時間を含み、`waits/op` は値 1 個を渡す間に送受信側が待機した回数の合計です。
 
@@ -114,15 +114,19 @@ elem, err := q.Dequeue()  // ウェイトフリー O(1)
 - **トレードオフ**: 名目容量 `n` に対して物理スロット `2n` が必要です。
 - **一時容量**: `P` 個の並行プロデューサーがいる場合、バックプレッシャーが効く前に `Cap()` を最大 `P-1` 個一時的に超えてエンキューされることがあります。
 
+`MPSC[T]`、`MPSCIndirect`、`MPSCPtr` では、一時停止中のプロデューサーによる呼び出しも含め、実行中の `Enqueue` は最大 `Cap()` 件です。
+
+`MPMC[T]`、`SPMC[T]`、`SPMCIndirect`、`SPMCPtr` を共有する場合は、新しいキューに最大 `Cap()` 件のバッチを 1 つ格納し、[単一コンシューマーで取り出す手順](#グレースフルシャットダウン)に従います。生産中にポーリングする場合や複数のコンシューマーが並行して取り出す場合は、対応する `Seq` キューを使います。
+
 ```go
 // 複数プロデューサー、単一コンシューマー
 q := lfq.NewMPSC[Event](1024)  // FAA プロデューサー、ウェイトフリーデキュー
 
-// 単一プロデューサー、複数コンシューマー
-q := lfq.NewSPMC[Task](1024)   // ウェイトフリーエンキュー、FAA コンシューマー
+// 1 つのプロデューサーが新しいキューにバッチを格納
+q := lfq.NewSPMC[Task](1024)
 
-// 複数プロデューサーと複数コンシューマー
-q := lfq.NewMPMC[*Request](4096)  // FAA ベース SCQ アルゴリズム
+// 複数のプロデューサーが新しいキューにバッチを格納
+q := lfq.NewMPMC[*Request](4096)
 ```
 
 サイクルベースのスロット検証が ABA 安全性を提供。エポックカウンターやハザードポインターは不要。
@@ -155,7 +159,7 @@ q := lfq.Build[T](lfq.New(1024).SingleConsumer())
 // SPMC - 単一プロデューサーのみ
 q := lfq.Build[T](lfq.New(1024).SingleProducer())
 
-// MPMC - 制約なし（デフォルト）
+// MPMC - ビルダーのデフォルト設定
 q := lfq.Build[T](lfq.New(1024))
 ```
 
@@ -270,7 +274,7 @@ type Event struct {
 }
 
 // 複数ソース → 単一プロセッサ
-events := lfq.NewMPSC[Event](8192)
+events := lfq.NewMPSC[Event](max(8192, len(sensors)))
 
 // イベントソース（複数プロデューサー）
 for sensor := range slices.Values(sensors) {
@@ -365,7 +369,7 @@ FAA を使うジェネリック MPMC キューと SPMC キューでは、`Drain(
 │    はい    │   いいえ                はい    │   いいえ         │
 │     │      │      │                   │      │      │           │
 │     ▼      │      ▼                   ▼      │      ▼           │
-│   SPSC     │    SPMC                MPSC     │    MPMC          │
+│  SPSC[T]   │  SPMCSeq[T]           MPSC[T]   │  MPMCSeq[T]      │
 │            │                                 │                  │
 └────────────┴─────────────────────────────────┴──────────────────┘
 

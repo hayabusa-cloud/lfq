@@ -31,8 +31,8 @@ q := lfq.NewSPSC[Event](1024)
 // Builder API - 根据约束自动选择算法
 q := lfq.Build[Event](lfq.New(1024).SingleProducer().SingleConsumer())  // → SPSC
 q := lfq.Build[Event](lfq.New(1024).SingleConsumer())                   // → MPSC
-q := lfq.Build[Event](lfq.New(1024).SingleProducer())                   // → SPMC
-q := lfq.Build[Event](lfq.New(1024))                                    // → MPMC
+q := lfq.Build[Event](lfq.New(1024).SingleProducer().Compact())         // → SPMCSeq
+q := lfq.Build[Event](lfq.New(1024).Compact())                          // → MPMCSeq
 ```
 
 ## 安装
@@ -71,7 +71,7 @@ Atomix 编译器会内联 `atomix` 操作。CI 使用标准 Go 编译器运行�
 
 ## 基准测试
 
-CI 在原生 Linux amd64 和 arm64 上使用 Atomix 编译器和 `GOMAXPROCS=2` 运行 `make bench-ci`。Actions 摘要显示每项基准十次采样的中位数，涵盖会话交接与重试、四种队列各执行一次入队和出队，以及 SPMC 多消费者并发出队。原始样本保存在工作流产物中。
+CI 在原生 Linux amd64 和 arm64 上使用 Atomix 编译器和 `GOMAXPROCS=2` 运行 `make bench-ci`。Actions 摘要显示每项基准十次采样的中位数，涵盖会话交接与重试、四种队列各执行一次入队和出队，以及 `SPMCIndirectSeq` 多消费者并发出队。原始样本保存在工作流产物中。
 
 `Handoff` 在两个 goroutine 之间传递一个值，分别使用 `sess` 的四槽 SPSC 数据队列和相同容量的 Go 缓冲通道。两者在队列满或空时都使用 `iox.Backoff`。`ns/op` 包含等待时间，`waits/op` 表示每传递一个值时两端等待次数之和。
 
@@ -114,15 +114,19 @@ elem, err := q.Dequeue()  // 无等待 O(1)
 - **权衡**：名义容量为 `n` 时需要 `2n` 个物理槽位。
 - **瞬时容量**：当有 `P` 个并发生产者时，在背压生效前，可能会短暂入队最多 `P-1` 个超过 `Cap()` 的额外元素。
 
+使用 `MPSC[T]`、`MPSCIndirect` 或 `MPSCPtr` 时，同时进行的 `Enqueue` 调用最多为 `Cap()` 个，已暂停的生产者仍计入其中。
+
+共享 `MPMC[T]`、`SPMC[T]`、`SPMCIndirect` 或 `SPMCPtr` 时，每批使用一个新队列，最多放入 `Cap()` 个元素，然后按[单消费者排空流程](#优雅关闭)取出。如果消费者需要在生产期间轮询，或多个消费者需要并发出队，请使用对应的 `Seq` 队列。
+
 ```go
 // 多生产者，单消费者
 q := lfq.NewMPSC[Event](1024)  // FAA 生产者，无等待出队
 
-// 单生产者，多消费者
-q := lfq.NewSPMC[Task](1024)   // 无等待入队，FAA 消费者
+// 一个生产者将一批元素放入新队列
+q := lfq.NewSPMC[Task](1024)
 
-// 多生产者和消费者
-q := lfq.NewMPMC[*Request](4096)  // 基于 FAA 的 SCQ 算法
+// 多个生产者将一批元素放入新队列
+q := lfq.NewMPMC[*Request](4096)
 ```
 
 基于周期的槽位验证提供 ABA 安全性，无需纪元计数器或风险指针。
@@ -155,7 +159,7 @@ q := lfq.Build[T](lfq.New(1024).SingleConsumer())
 // SPMC - 仅单生产者
 q := lfq.Build[T](lfq.New(1024).SingleProducer())
 
-// MPMC - 无约束（默认）
+// MPMC - 默认构建器选项
 q := lfq.Build[T](lfq.New(1024))
 ```
 
@@ -270,7 +274,7 @@ type Event struct {
 }
 
 // 多源 → 单处理器
-events := lfq.NewMPSC[Event](8192)
+events := lfq.NewMPSC[Event](max(8192, len(sensors)))
 
 // 事件源（多生产者）
 for sensor := range slices.Values(sensors) {
@@ -365,7 +369,7 @@ for {
 │    是      │     否                  是      │     否           │
 │     │      │      │                   │      │      │           │
 │     ▼      │      ▼                   ▼      │      ▼           │
-│   SPSC     │    SPMC                MPSC     │    MPMC          │
+│  SPSC[T]   │  SPMCSeq[T]           MPSC[T]   │  MPMCSeq[T]      │
 │            │                                 │                  │
 └────────────┴─────────────────────────────────┴──────────────────┘
 

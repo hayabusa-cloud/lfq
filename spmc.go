@@ -10,6 +10,8 @@ import (
 )
 
 // SPMC is an FAA-based single-producer multi-consumer bounded queue.
+// When sharing the queue, follow the batch protocol in [Drainer].
+// Use [SPMCSeq] for live polling or concurrent consumers.
 //
 // Consumers use FAA to blindly claim positions (SCQ-style), requiring 2n
 // physical slots for capacity n.
@@ -100,7 +102,7 @@ func (q *SPMC[T]) Drain() {
 	q.draining.StoreRelease(true)
 }
 
-// Dequeue removes and returns an element (multiple consumers safe).
+// Dequeue removes and returns an element.
 // Returns (zero-value, ErrWouldBlock) if the queue is empty.
 func (q *SPMC[T]) Dequeue() (T, error) {
 	// Early exit via threshold (livelock prevention)

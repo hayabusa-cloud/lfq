@@ -424,14 +424,13 @@ func TestMPSCFIFOOrderingPerProducer(t *testing.T) {
 	}
 }
 
-// TestSPMCFIFOOrderingPerConsumer verifies FIFO ordering across consumers.
-// No item should be consumed twice and all items should be consumed.
-func TestSPMCFIFOOrderingPerConsumer(t *testing.T) {
+// TestSPMCSeqConcurrentDelivery checks that consumers receive each item once.
+func TestSPMCSeqConcurrentDelivery(t *testing.T) {
 	if lfq.RaceEnabled {
 		t.Skip("skip: FIFO test requires precise timing")
 	}
 
-	q := lfq.NewSPMC[int](2048)
+	q := lfq.NewSPMCSeq[int](2048)
 	const (
 		numConsumers = 2 // Reduced for faster execution
 		totalItems   = 2000

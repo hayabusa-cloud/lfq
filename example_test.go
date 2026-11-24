@@ -47,7 +47,7 @@ func ExampleNewSPSC() {
 	// 50
 }
 
-// ExampleNewMPMC demonstrates a multi-producer multi-consumer queue.
+// ExampleNewMPMC drains a batch after all producers finish.
 func ExampleNewMPMC() {
 	q := lfq.NewMPMC[string](16)
 
@@ -65,8 +65,8 @@ func ExampleNewMPMC() {
 		}(p)
 	}
 
-	// Wait for producers then consume
 	wg.Wait()
+	q.Drain()
 
 	for {
 		msg, err := q.Dequeue()

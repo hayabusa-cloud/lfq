@@ -21,7 +21,7 @@ func main() {
 	names := []string{
 		"SPSCSessionHandoff/Queue", "SPSCSessionHandoff/Channel", "SPSCSessionFullRetry",
 		"SPSCIndirect_SingleOp", "MPSCIndirect_SingleOp", "SPMCIndirect_SingleOp", "MPMCIndirect_SingleOp",
-		"SPMCIndirect_ParallelConsumers",
+		"SPMCIndirectSeq_ParallelConsumers",
 	}
 	results := make(map[string]map[string][]float64)
 	for _, name := range names {

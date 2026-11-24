@@ -31,8 +31,8 @@ q := lfq.NewSPSC[Event](1024)
 // Builder API - sélectionne automatiquement l'algorithme selon les contraintes
 q := lfq.Build[Event](lfq.New(1024).SingleProducer().SingleConsumer())  // → SPSC
 q := lfq.Build[Event](lfq.New(1024).SingleConsumer())                   // → MPSC
-q := lfq.Build[Event](lfq.New(1024).SingleProducer())                   // → SPMC
-q := lfq.Build[Event](lfq.New(1024))                                    // → MPMC
+q := lfq.Build[Event](lfq.New(1024).SingleProducer().Compact())         // → SPMCSeq
+q := lfq.Build[Event](lfq.New(1024).Compact())                          // → MPMCSeq
 ```
 
 ## Installation
@@ -71,7 +71,7 @@ Le compilateur Atomix développe en ligne les opérations d’`atomix`. La CI ex
 
 ## Mesures de performance
 
-La CI exécute `make bench-ci` sur des machines Linux amd64 et arm64 natives avec le compilateur Atomix et `GOMAXPROCS=2`. Le récapitulatif Actions donne la médiane de dix mesures pour le transfert de session et la nouvelle tentative, pour une insertion suivie d’un retrait sur chacun des quatre types de files, et pour SPMC avec plusieurs consommateurs concurrents. Les artefacts contiennent les mesures brutes.
+La CI exécute `make bench-ci` sur des machines Linux amd64 et arm64 natives avec le compilateur Atomix et `GOMAXPROCS=2`. Le récapitulatif Actions donne la médiane de dix mesures pour le transfert de session et la nouvelle tentative, pour une insertion suivie d’un retrait sur chacun des quatre types de files, et pour `SPMCIndirectSeq` avec plusieurs consommateurs concurrents. Les artefacts contiennent les mesures brutes.
 
 `Handoff` transmet une valeur entre deux goroutines au moyen de la file de données SPSC à quatre places utilisée par `sess` ou d’un canal Go doté d’un tampon de même capacité. Les deux utilisent `iox.Backoff` quand la file est pleine ou vide. `ns/op` inclut le temps d’attente et `waits/op` compte les attentes des deux côtés pour chaque valeur transmise.
 
@@ -114,15 +114,19 @@ Les files à accès multiple par défaut réservent des positions par fetch-and-
 - **Compromis** : Nécessite `2n` emplacements physiques pour une capacité nominale `n`.
 - **Capacité transitoire** : Avec `P` producteurs concurrents, jusqu'à `P-1` éléments supplémentaires peuvent être temporairement enfilés au-delà de `Cap()` avant l'application de la contre-pression.
 
+Pour `MPSC[T]`, `MPSCIndirect` et `MPSCPtr`, la limite est de `Cap()` appels à `Enqueue` en cours, y compris ceux des producteurs suspendus.
+
+Pour partager `MPMC[T]`, `SPMC[T]`, `SPMCIndirect` ou `SPMCPtr`, utilisez une file neuve pour un seul lot d’au plus `Cap()` éléments et suivez le [protocole de vidage par un seul consommateur](#arrêt-gracieux). Utilisez la file `Seq` correspondante si les consommateurs interrogent la file pendant la production ou en retirent des éléments en parallèle.
+
 ```go
 // Producteurs multiples, consommateur unique
 q := lfq.NewMPSC[Event](1024)  // Producteurs FAA, dequeue sans attente
 
-// Producteur unique, consommateurs multiples
-q := lfq.NewSPMC[Task](1024)   // Enqueue sans attente, consommateurs FAA
+// Un producteur remplit un lot dans une file neuve
+q := lfq.NewSPMC[Task](1024)
 
-// Producteurs et consommateurs multiples
-q := lfq.NewMPMC[*Request](4096)  // Algorithme SCQ basé sur FAA
+// Plusieurs producteurs remplissent un lot dans une file neuve
+q := lfq.NewMPMC[*Request](4096)
 ```
 
 La validation d'emplacements basée sur les cycles fournit la sécurité ABA sans compteurs d'époque ni pointeurs de danger.
@@ -155,7 +159,7 @@ q := lfq.Build[T](lfq.New(1024).SingleConsumer())
 // SPMC - producteur unique seulement
 q := lfq.Build[T](lfq.New(1024).SingleProducer())
 
-// MPMC - sans contraintes (par défaut)
+// MPMC - options par défaut du constructeur
 q := lfq.Build[T](lfq.New(1024))
 ```
 
@@ -270,7 +274,7 @@ type Event struct {
 }
 
 // Sources multiples → Processeur unique
-events := lfq.NewMPSC[Event](8192)
+events := lfq.NewMPSC[Event](max(8192, len(sensors)))
 
 // Sources d'événements (producteurs multiples)
 for sensor := range slices.Values(sensors) {
@@ -365,7 +369,7 @@ Dans les variantes fondées sur FAA, `Drain()` désactive le seuil de retrait de
 │    Oui     │     Non                 Oui     │     Non         │
 │     │      │      │                   │      │      │          │
 │     ▼      │      ▼                   ▼      │      ▼          │
-│   SPSC     │    SPMC                MPSC     │    MPMC         │
+│  SPSC[T]   │  SPMCSeq[T]           MPSC[T]   │  MPMCSeq[T]     │
 │            │                                 │                  │
 └────────────┴─────────────────────────────────┴─────────────────┘
 

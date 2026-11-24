@@ -661,11 +661,11 @@ func TestMPSCConcurrentProducers(t *testing.T) {
 	}
 }
 
-func TestSPMCConcurrentConsumers(t *testing.T) {
+func TestSPMCSeqConcurrentConsumers(t *testing.T) {
 	if lfq.RaceEnabled {
 		t.Skip("skip: lock-free algorithm uses cross-variable memory ordering")
 	}
-	q := lfq.NewSPMC[int](1024)
+	q := lfq.NewSPMCSeq[int](1024)
 	numItems := 800
 	numConsumers := 8
 

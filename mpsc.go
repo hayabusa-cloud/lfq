@@ -10,6 +10,7 @@ import (
 )
 
 // MPSC is an FAA-based multi-producer single-consumer bounded queue.
+// At most Cap() calls to Enqueue may be in flight, including paused calls.
 //
 // Producers use FAA to blindly claim positions (SCQ-style), requiring 2n
 // physical slots for capacity n.
@@ -70,7 +71,7 @@ func (q *MPSC[T]) Drain() {
 	q.draining.StoreRelease(true)
 }
 
-// Enqueue adds an element to the queue (multiple producers safe).
+// Enqueue adds an element to the queue. At most Cap() calls may overlap.
 // Returns ErrWouldBlock if the queue is full.
 func (q *MPSC[T]) Enqueue(elem *T) error {
 	sw := spin.Wait{}

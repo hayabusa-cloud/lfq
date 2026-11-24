@@ -105,7 +105,7 @@ bench:
 	GOROOT="$(GOROOT_INTRINSIC)" "$(GO_INTRINSIC)" test -run '^$$' -bench=. -benchmem $(BENCH_FLAGS) ./...
 
 bench-session: BENCH_PATTERN = ^BenchmarkSPSCSession
-bench-ci: BENCH_PATTERN = ^Benchmark(SPSCSession(Handoff|FullRetry)|(SPSC|MPSC|SPMC|MPMC)Indirect_SingleOp|SPMCIndirect_ParallelConsumers)$$
+bench-ci: BENCH_PATTERN = ^Benchmark(SPSCSession(Handoff|FullRetry)|(SPSC|MPSC|SPMC|MPMC)Indirect_SingleOp|SPMCIndirectSeq_ParallelConsumers)$$
 bench-session bench-ci:
 	$(require-compiler)
 	GOROOT="$(GOROOT_INTRINSIC)" "$(GO_INTRINSIC)" test -run '^$$' -bench '$(BENCH_PATTERN)' -benchmem -benchtime=200ms -count=10 -cpu=2 -timeout=2m .
