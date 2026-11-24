@@ -177,8 +177,9 @@ type ConsumerPtr interface {
 // Example:
 //
 //	prodWg.Wait()  // Wait for producers to finish
-//	if d, ok := q.(lfq.Drainer); ok {
-//	    d.Drain()
+//	// For a queue value initialized with Init, use its address as q.
+//	if d, ok := any(q).(lfq.Drainer); ok {
+//		d.Drain()
 //	}
 //	// Drain the batch in this goroutine.
 type Drainer interface {

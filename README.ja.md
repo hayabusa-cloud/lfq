@@ -330,18 +330,18 @@ return false
 // プロデューサーゴルーチンが終了
 prodWg.Wait()
 
-// これ以上エンキューしないことを通知
-if d, ok := q.(lfq.Drainer); ok {
-    d.Drain()
+// キュー変数を Init で初期化した場合は、そのアドレスを q として使う。
+if d, ok := any(q).(lfq.Drainer); ok {
+	d.Drain()
 }
 
 // キューが空を返すまでデキューする。
 for {
-    item, err := q.Dequeue()
-    if err != nil {
-        break
-    }
-    process(item)
+	item, err := q.Dequeue()
+	if err != nil {
+		break
+	}
+	process(item)
 }
 ```
 

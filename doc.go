@@ -312,9 +312,9 @@
 //	// Producer goroutines finish
 //	prodWg.Wait()
 //
-//	// Signal no more enqueues will occur
-//	if d, ok := q.(lfq.Drainer); ok {
-//	    d.Drain()
+//	// For a queue value initialized with Init, use its address as q.
+//	if d, ok := any(q).(lfq.Drainer); ok {
+//		d.Drain()
 //	}
 //
 //	// Drain the batch in this goroutine.

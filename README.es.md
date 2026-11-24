@@ -330,18 +330,18 @@ Para vaciar un lote en una cola recién inicializada, espere a que termine la ú
 // Las goroutines productoras terminan
 prodWg.Wait()
 
-// Señalar que no habrá más enqueues
-if d, ok := q.(lfq.Drainer); ok {
-    d.Drain()
+// Si inicializó la cola con Init, use su dirección como q.
+if d, ok := any(q).(lfq.Drainer); ok {
+	d.Drain()
 }
 
 // Extraer hasta que la cola indique que está vacía.
 for {
-    item, err := q.Dequeue()
-    if err != nil {
-        break
-    }
-    process(item)
+	item, err := q.Dequeue()
+	if err != nil {
+		break
+	}
+	process(item)
 }
 ```
 

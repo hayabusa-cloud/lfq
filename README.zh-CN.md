@@ -330,18 +330,18 @@ return false
 // 生产者协程结束
 prodWg.Wait()
 
-// 通知不再有入队操作
-if d, ok := q.(lfq.Drainer); ok {
-    d.Drain()
+// 如果用 Init 初始化了队列变量，请用该变量的地址作为 q。
+if d, ok := any(q).(lfq.Drainer); ok {
+	d.Drain()
 }
 
 // 持续出队，直到队列报告为空。
 for {
-    item, err := q.Dequeue()
-    if err != nil {
-        break
-    }
-    process(item)
+	item, err := q.Dequeue()
+	if err != nil {
+		break
+	}
+	process(item)
 }
 ```
 

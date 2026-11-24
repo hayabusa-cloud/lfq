@@ -330,18 +330,18 @@ Pour vider un lot dans une file fraîchement initialisée, attendez le retour du
 // Les goroutines productrices terminent
 prodWg.Wait()
 
-// Signaler qu'il n'y aura plus d'enqueues
-if d, ok := q.(lfq.Drainer); ok {
-    d.Drain()
+// Si vous avez initialisé la file avec Init, utilisez son adresse comme q.
+if d, ok := any(q).(lfq.Drainer); ok {
+	d.Drain()
 }
 
 // Retirer les éléments jusqu’à ce que la file se déclare vide.
 for {
-    item, err := q.Dequeue()
-    if err != nil {
-        break
-    }
-    process(item)
+	item, err := q.Dequeue()
+	if err != nil {
+		break
+	}
+	process(item)
 }
 ```
 

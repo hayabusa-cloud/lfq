@@ -330,18 +330,18 @@ To drain a batch from a freshly initialized queue, wait for every producer's fin
 // Producer goroutines finish
 prodWg.Wait()
 
-// Signal no more enqueues will occur
-if d, ok := q.(lfq.Drainer); ok {
-    d.Drain()
+// For a queue value initialized with Init, use its address as q.
+if d, ok := any(q).(lfq.Drainer); ok {
+	d.Drain()
 }
 
 // Dequeue until the queue reports empty.
 for {
-    item, err := q.Dequeue()
-    if err != nil {
-        break
-    }
-    process(item)
+	item, err := q.Dequeue()
+	if err != nil {
+		break
+	}
+	process(item)
 }
 ```
 
