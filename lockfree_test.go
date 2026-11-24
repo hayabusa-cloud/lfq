@@ -465,56 +465,43 @@ func TestHighContentionDequeue(t *testing.T) {
 // Medium Contention Tests (NEW)
 // =============================================================================
 
-// TestMediumContention tests moderate concurrency levels (4-8 workers, capacity 512).
-// This fills the gap between single-threaded tests and extreme stress tests.
+// TestMediumContention exercises typed queues with producers and consumers running together.
 func TestMediumContention(t *testing.T) {
 	if lfq.RaceEnabled {
 		t.Skip("skip: lock-free algorithm uses cross-variable memory ordering")
 	}
-	tests := []struct {
-		name      string
-		producers int
-		consumers int
-		capacity  int
-		items     int
-	}{
-		{"MPMC_4x4", 4, 4, 512, 1000},
-		{"MPMC_8x8", 8, 8, 512, 1000},
-		{"MPSC_8x1", 8, 1, 512, 1000},
-		{"SPMC_1x8", 1, 8, 512, 1000},
-	}
+	const capacity, items = 512, 1000
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			q := lfq.NewMPMC[int](tt.capacity)
-			testMediumContention(t, q, tt.producers, tt.consumers, tt.items)
-		})
-	}
+	t.Run("MPMCSeq_4x4", func(t *testing.T) {
+		testMediumContentionTyped(t, lfq.NewMPMCSeq[int](capacity), 4, 4, items)
+	})
+	t.Run("MPMCSeq_8x8", func(t *testing.T) {
+		testMediumContentionTyped(t, lfq.NewMPMCSeq[int](capacity), 8, 8, items)
+	})
+	t.Run("MPSC_8x1", func(t *testing.T) {
+		testMediumContentionTyped(t, lfq.NewMPSC[int](capacity), 8, 1, items)
+	})
+	t.Run("SPMCSeq_1x8", func(t *testing.T) {
+		testMediumContentionTyped(t, lfq.NewSPMCSeq[int](capacity), 1, 8, items)
+	})
 }
 
-// TestMediumContentionIndirect tests indirect variants at medium contention.
+// TestMediumContentionIndirect checks concurrent delivery through the packed uintptr queues.
 func TestMediumContentionIndirect(t *testing.T) {
 	if lfq.RaceEnabled {
 		t.Skip("skip: lock-free algorithm uses cross-variable memory ordering")
 	}
-	tests := []struct {
-		name      string
-		producers int
-		consumers int
-		capacity  int
-		items     int
-	}{
-		{"MPMCIndirect_4x4", 4, 4, 512, 1000},
-		{"MPSCIndirect_8x1", 8, 1, 512, 1000},
-		{"SPMCIndirect_1x8", 1, 8, 512, 1000},
-	}
+	const capacity, items = 512, 1000
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			q := lfq.NewMPMCIndirect(tt.capacity)
-			testMediumContentionIndirect(t, q, tt.producers, tt.consumers, tt.items)
-		})
-	}
+	t.Run("MPMCIndirect_4x4", func(t *testing.T) {
+		testMediumContentionIndirect(t, lfq.NewMPMCIndirect(capacity), 4, 4, items)
+	})
+	t.Run("MPSCIndirect_8x1", func(t *testing.T) {
+		testMediumContentionIndirect(t, lfq.NewMPSCIndirect(capacity), 8, 1, items)
+	})
+	t.Run("SPMCIndirectSeq_1x8", func(t *testing.T) {
+		testMediumContentionIndirect(t, lfq.NewSPMCIndirectSeq(capacity), 1, 8, items)
+	})
 }
 
 // TestMediumContentionCompact tests compact variants at medium contention.
@@ -525,288 +512,37 @@ func TestMediumContentionCompact(t *testing.T) {
 	const capacity, items = 512, 1000
 
 	t.Run("MPMCCompact_4x4", func(t *testing.T) {
-		testMediumContentionCompact(t, lfq.NewMPMCCompactIndirect(capacity), 4, 4, items)
+		testMediumContentionIndirect(t, lfq.NewMPMCCompactIndirect(capacity), 4, 4, items)
 	})
 	t.Run("MPSCCompact_8x1", func(t *testing.T) {
-		testMediumContentionCompact(t, lfq.NewMPSCCompactIndirect(capacity), 8, 1, items)
+		testMediumContentionIndirect(t, lfq.NewMPSCCompactIndirect(capacity), 8, 1, items)
 	})
 	t.Run("SPMCCompact_1x8", func(t *testing.T) {
-		testMediumContentionCompact(t, lfq.NewSPMCCompactIndirect(capacity), 1, 8, items)
+		testMediumContentionIndirect(t, lfq.NewSPMCCompactIndirect(capacity), 1, 8, items)
 	})
 }
 
-func testMediumContention(t *testing.T, q *lfq.MPMC[int], numP, numC, totalItems int) {
+func testMediumContentionTyped(t *testing.T, q lfq.Queue[int], numP, numC, totalItems int) {
 	t.Helper()
 
-	// Pre-allocate ALL values before test (stable addresses)
-	values := make([]int, totalItems)
-	for i := range totalItems {
+	values := make([]int, totalItems+1)
+	for i := range values {
 		values[i] = i
 	}
-
-	itemsPerProd := totalItems / numP
-	var prodWg, consWg sync.WaitGroup
-	var produced, consumed atomix.Int64
-	seenValues := make([]atomix.Int32, totalItems)
-	done := make(chan struct{})
-	drainSignal := make(chan struct{})
-	var closeOnce sync.Once
-
-	// Start producers
-	for p := range numP {
-		prodWg.Add(1)
-		go func(id int) {
-			defer prodWg.Done()
-			backoff := iox.Backoff{}
-			start := id * itemsPerProd
-			end := start + itemsPerProd
-			for idx := start; idx < end; idx++ {
-				select {
-				case <-done:
-					return
-				default:
-				}
-				for {
-					select {
-					case <-done:
-						return
-					default:
-					}
-					if q.Enqueue(&values[idx]) == nil {
-						produced.Add(1)
-						backoff.Reset()
-						break
-					}
-					backoff.Wait()
-				}
-			}
-		}(p)
-	}
-
-	// Start consumers
-	for range numC {
-		consWg.Add(1)
-		go func() {
-			defer consWg.Done()
-			backoff := iox.Backoff{}
-			draining := false
-			emptyCount := 0
-			for {
-				select {
-				case <-done:
-					return
-				case <-drainSignal:
-					draining = true
-				default:
-				}
-				if consumed.Load() >= int64(totalItems) {
-					return
-				}
-				v, err := q.Dequeue()
-				if err == nil {
-					if v >= 0 && v < totalItems {
-						seenValues[v].Add(1)
-					}
-					consumed.Add(1)
-					emptyCount = 0
-					backoff.Reset()
-				} else if draining {
-					emptyCount++
-					if emptyCount > 1000 {
-						return
-					}
-				} else {
-					backoff.Wait()
-				}
-			}
-		}()
-	}
-
-	// Wait for producers, then drain
-	go func() {
-		prodWg.Wait()
-		q.Drain()
-		close(drainSignal)
-	}()
-
-	// Timeout watchdog
-	go func() {
-		timeout := time.After(5 * time.Second)
-		ticker := time.NewTicker(100 * time.Millisecond)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-timeout:
-				closeOnce.Do(func() { close(done) })
-				return
-			case <-ticker.C:
-				if consumed.Load() >= int64(totalItems) {
-					closeOnce.Do(func() { close(done) })
-					return
-				}
-			}
-		}
-	}()
-
-	consWg.Wait()
-	closeOnce.Do(func() { close(done) })
-
-	// Verify no duplicates or missing items
-	var missing, duplicates int
-	for i := range totalItems {
-		count := seenValues[i].Load()
-		if count == 0 {
-			missing++
-		} else if count > 1 {
-			duplicates++
-		}
-	}
-
-	if duplicates > 0 {
-		t.Errorf("Duplicated %d items (data corruption)", duplicates)
-	}
-
-	// Only check missing if test completed (not timed out)
-	if consumed.Load() >= int64(totalItems) && missing > 0 {
-		t.Logf("Missing %d items (queue loss)", missing)
-	}
-
-	t.Logf("Medium contention: produced=%d, consumed=%d, missing=%d", produced.Load(), consumed.Load(), missing)
+	enqueue := func(id int) error { return q.Enqueue(&values[id]) }
+	testMediumContentionDelivery(t, enqueue, q.Dequeue, numP, numC, totalItems)
 }
 
-func testMediumContentionIndirect(t *testing.T, q *lfq.MPMCIndirect, numP, numC, totalItems int) {
+func testMediumContentionIndirect(t *testing.T, q lfq.QueueIndirect, numP, numC, totalItems int) {
 	t.Helper()
-
-	itemsPerProd := totalItems / numP
-	var prodWg, consWg sync.WaitGroup
-	var produced, consumed atomix.Int64
-	seenValues := make([]atomix.Int32, totalItems+1)
-	done := make(chan struct{})
-	drainSignal := make(chan struct{})
-	var closeOnce sync.Once
-
-	// Start producers
-	for p := range numP {
-		prodWg.Add(1)
-		go func(id int) {
-			defer prodWg.Done()
-			backoff := iox.Backoff{}
-			for i := range itemsPerProd {
-				select {
-				case <-done:
-					return
-				default:
-				}
-				v := uintptr(id*itemsPerProd + i + 1)
-				for {
-					select {
-					case <-done:
-						return
-					default:
-					}
-					if q.Enqueue(v) == nil {
-						produced.Add(1)
-						backoff.Reset()
-						break
-					}
-					backoff.Wait()
-				}
-			}
-		}(p)
-	}
-
-	// Start consumers
-	for range numC {
-		consWg.Add(1)
-		go func() {
-			defer consWg.Done()
-			backoff := iox.Backoff{}
-			draining := false
-			emptyCount := 0
-			for {
-				select {
-				case <-done:
-					return
-				case <-drainSignal:
-					draining = true
-				default:
-				}
-				if consumed.Load() >= int64(totalItems) {
-					return
-				}
-				v, err := q.Dequeue()
-				if err == nil {
-					if v > 0 && v <= uintptr(totalItems) {
-						seenValues[int(v)].Add(1)
-					}
-					consumed.Add(1)
-					emptyCount = 0
-					backoff.Reset()
-				} else if draining {
-					emptyCount++
-					if emptyCount > 1000 {
-						return
-					}
-				} else {
-					backoff.Wait()
-				}
-			}
-		}()
-	}
-
-	// Wait for producers, then drain
-	go func() {
-		prodWg.Wait()
-		q.Drain()
-		close(drainSignal)
-	}()
-
-	// Timeout watchdog
-	go func() {
-		timeout := time.After(5 * time.Second)
-		ticker := time.NewTicker(100 * time.Millisecond)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-timeout:
-				closeOnce.Do(func() { close(done) })
-				return
-			case <-ticker.C:
-				if consumed.Load() >= int64(totalItems) {
-					closeOnce.Do(func() { close(done) })
-					return
-				}
-			}
-		}
-	}()
-
-	consWg.Wait()
-	closeOnce.Do(func() { close(done) })
-
-	// Verify no duplicates or missing items
-	var missing, duplicates int
-	for i := 1; i <= totalItems; i++ {
-		count := seenValues[i].Load()
-		if count == 0 {
-			missing++
-		} else if count > 1 {
-			duplicates++
-		}
-	}
-
-	if duplicates > 0 {
-		t.Errorf("Duplicated %d items (data corruption)", duplicates)
-	}
-
-	// Only check missing if test completed (not timed out)
-	if consumed.Load() >= int64(totalItems) && missing > 0 {
-		t.Logf("Missing %d items (queue loss)", missing)
-	}
-
-	t.Logf("Medium contention (Indirect): produced=%d, consumed=%d, missing=%d", produced.Load(), consumed.Load(), missing)
+	testMediumContentionDelivery(t, q.Enqueue, q.Dequeue, numP, numC, totalItems)
 }
 
-func testMediumContentionCompact(t *testing.T, q lfq.QueueIndirect, numP, numC, totalItems int) {
+func testMediumContentionDelivery[T int | uintptr](
+	t *testing.T,
+	enqueue func(T) error, dequeue func() (T, error),
+	numP, numC, totalItems int,
+) {
 	t.Helper()
 
 	var wg sync.WaitGroup
@@ -828,7 +564,7 @@ func testMediumContentionCompact(t *testing.T, q lfq.QueueIndirect, numP, numC, 
 						return
 					default:
 					}
-					if q.Enqueue(uintptr(value)) == nil {
+					if enqueue(T(value)) == nil {
 						produced.Add(1)
 						backoff.Reset()
 						break
@@ -854,9 +590,9 @@ func testMediumContentionCompact(t *testing.T, q lfq.QueueIndirect, numP, numC, 
 				if consumed.Load() >= int64(totalItems) {
 					return
 				}
-				v, err := q.Dequeue()
+				v, err := dequeue()
 				if err == nil {
-					if v > 0 && v <= uintptr(totalItems) {
+					if v > 0 && v <= T(totalItems) {
 						seenValues[int(v)].Add(1)
 					}
 					consumed.Add(1)
