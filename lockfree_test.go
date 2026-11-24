@@ -32,232 +32,108 @@ import (
 // High Contention Tests (Consolidated)
 // =============================================================================
 
-// TestHighContentionEnqueue consolidates all enqueue-side high contention tests.
-// Tests MPSC variants with 32 producers competing for capacity=4.
+// TestHighContentionEnqueue exercises MPSC backpressure with 32 producers and one consumer.
 func TestHighContentionEnqueue(t *testing.T) {
 	if lfq.RaceEnabled {
 		t.Skip("skip: lock-free algorithm uses cross-variable memory ordering")
 	}
-	tests := []struct {
-		name string
-		enq  func() error
-		deq  func()
-	}{
-		{
-			name: "MPSC",
-			enq: func() error {
-				q := lfq.NewMPSC[int](4)
-				go func() {
-					backoff := iox.Backoff{}
-					for {
-						if _, err := q.Dequeue(); err == nil {
-							backoff.Reset()
-						} else {
-							backoff.Wait()
-						}
-					}
-				}()
-				v := 1
-				return q.Enqueue(&v)
-			},
-		},
-	}
+	const producers, attempts = 32, 1000
 
-	// Run each variant individually to avoid interface issues
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var wg sync.WaitGroup
-			var enqueued, blocked atomix.Int64
-
-			// Test MPSC
-			q := lfq.NewMPSC[int](4)
-			done := make(chan struct{})
-			go func() {
-				backoff := iox.Backoff{}
-				for {
-					select {
-					case <-done:
-						return
-					default:
-						if _, err := q.Dequeue(); err == nil {
-							backoff.Reset()
-						} else {
-							backoff.Wait()
-						}
-					}
-				}
-			}()
-
-			for range 32 {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					for range 1000 {
-						v := 1
-						if q.Enqueue(&v) == nil {
-							enqueued.Add(1)
-						} else {
-							blocked.Add(1)
-						}
-					}
-				}()
-			}
-
-			wg.Wait()
-			close(done)
-
-			if enqueued.Load() == 0 {
-				t.Error("expected some successful enqueues")
-			}
-			if blocked.Load() == 0 {
-				t.Error("expected some blocked enqueues (queue full)")
-			}
-		})
-	}
-
-	// MPSCIndirect
+	t.Run("MPSC", func(t *testing.T) {
+		q := lfq.NewMPSC[int](producers)
+		testContendedEnqueue(t, producers, attempts, func(v int) error { return q.Enqueue(&v) }, q.Dequeue)
+	})
 	t.Run("MPSCIndirect", func(t *testing.T) {
-		q := lfq.NewMPSCIndirect(4)
-		var wg sync.WaitGroup
-		var enqueued, blocked atomix.Int64
-
-		done := make(chan struct{})
-		go func() {
-			backoff := iox.Backoff{}
-			for {
-				select {
-				case <-done:
-					return
-				default:
-					if _, err := q.Dequeue(); err == nil {
-						backoff.Reset()
-					} else {
-						backoff.Wait()
-					}
-				}
-			}
-		}()
-
-		for range 32 {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for range 1000 {
-					if q.Enqueue(1) == nil {
-						enqueued.Add(1)
-					} else {
-						blocked.Add(1)
-					}
-				}
-			}()
-		}
-
-		wg.Wait()
-		close(done)
-
-		if enqueued.Load() == 0 {
-			t.Error("expected some successful enqueues")
-		}
-		if blocked.Load() == 0 {
-			t.Error("expected some blocked enqueues (queue full)")
-		}
+		q := lfq.NewMPSCIndirect(producers)
+		testContendedEnqueue(t, producers, attempts, func(v int) error { return q.Enqueue(uintptr(v)) }, q.Dequeue)
 	})
-
-	// MPSCPtr
 	t.Run("MPSCPtr", func(t *testing.T) {
-		q := lfq.NewMPSCPtr(4)
-		var wg sync.WaitGroup
-		var enqueued, blocked atomix.Int64
+		q := lfq.NewMPSCPtr(producers)
+		values := make([]byte, producers*attempts)
+		var pin runtime.Pinner
+		pin.Pin(&values[0])
+		defer pin.Unpin()
 
-		done := make(chan struct{})
-		go func() {
-			backoff := iox.Backoff{}
-			for {
-				select {
-				case <-done:
-					return
-				default:
-					if _, err := q.Dequeue(); err == nil {
-						backoff.Reset()
-					} else {
-						backoff.Wait()
-					}
-				}
-			}
-		}()
-
-		for range 32 {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for range 1000 {
-					if q.Enqueue(unsafe.Pointer(new(int))) == nil {
-						enqueued.Add(1)
-					} else {
-						blocked.Add(1)
-					}
-				}
-			}()
-		}
-
-		wg.Wait()
-		close(done)
-
-		if enqueued.Load() == 0 {
-			t.Error("expected some successful enqueues")
-		}
-		if blocked.Load() == 0 {
-			t.Error("expected some blocked enqueues (queue full)")
-		}
+		enqueue := func(i int) error { return q.Enqueue(unsafe.Pointer(&values[i])) }
+		testContendedEnqueue(t, producers, attempts, enqueue, q.Dequeue)
 	})
-
-	// MPSCCompact
 	t.Run("MPSCCompact", func(t *testing.T) {
 		q := lfq.NewMPSCCompactIndirect(4)
-		var wg sync.WaitGroup
-		var enqueued, blocked atomix.Int64
+		testContendedEnqueue(t, producers, attempts, func(v int) error { return q.Enqueue(uintptr(v)) }, q.Dequeue)
+	})
+}
 
-		done := make(chan struct{})
+func testContendedEnqueue[T any](
+	t *testing.T, producers, attempts int,
+	enqueue func(int) error, dequeue func() (T, error),
+) {
+	t.Helper()
+
+	finished := make(chan int, producers)
+	for p := range producers {
 		go func() {
-			backoff := iox.Backoff{}
-			for {
-				select {
-				case <-done:
-					return
-				default:
-					if _, err := q.Dequeue(); err == nil {
-						backoff.Reset()
-					} else {
-						backoff.Wait()
-					}
+			accepted := 0
+			for i := range attempts {
+				err := enqueue(p*attempts + i)
+				if err == nil {
+					accepted++
+				} else if err != lfq.ErrWouldBlock {
+					t.Errorf("Enqueue returned %v", err)
+					break
 				}
 			}
+			finished <- accepted
 		}()
+	}
 
-		for range 32 {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for range 1000 {
-					if q.Enqueue(1) == nil {
-						enqueued.Add(1)
-					} else {
-						blocked.Add(1)
-					}
+	// One producer's burst exceeds the ring size, so it exercises backpressure
+	// before the consumer can make room.
+	accepted := <-finished
+	if accepted == attempts {
+		t.Errorf("all %d attempts by one producer succeeded before the first Dequeue", attempts)
+	}
+	consumed := 0
+	var backoff iox.Backoff
+	var unexpected error
+	for remaining := producers - 1; remaining > 0; {
+		select {
+		case n := <-finished:
+			accepted += n
+			remaining--
+		default:
+			if _, err := dequeue(); err == nil {
+				consumed++
+				backoff.Reset()
+			} else {
+				if err != lfq.ErrWouldBlock {
+					unexpected = err
 				}
-			}()
+				backoff.Wait()
+			}
 		}
+	}
+	if unexpected != nil {
+		t.Fatalf("Dequeue returned %v", unexpected)
+	}
+	if accepted == 0 {
+		t.Fatal("all enqueue attempts were refused")
+	}
 
-		wg.Wait()
-		close(done)
-
-		if enqueued.Load() == 0 {
-			t.Error("expected some successful enqueues")
+	for consumed < accepted {
+		if _, err := dequeue(); err != nil {
+			t.Fatalf("consumed %d of %d accepted items before %v", consumed, accepted, err)
 		}
-		if blocked.Load() == 0 {
-			t.Error("expected some blocked enqueues (queue full)")
-		}
-	})
+		consumed++
+	}
+	if v, err := dequeue(); consumed != accepted || err != lfq.ErrWouldBlock {
+		t.Fatalf("consumed %d of %d accepted items, next Dequeue returned (%v, %v)", consumed, accepted, v, err)
+	}
+	if err := enqueue(0); err != nil {
+		t.Fatalf("Enqueue after draining returned %v", err)
+	}
+	if _, err := dequeue(); err != nil {
+		t.Fatalf("Dequeue of the next item returned %v", err)
+	}
 }
 
 // TestHighContentionDequeue consolidates all dequeue-side high contention tests.
