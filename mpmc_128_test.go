@@ -141,6 +141,23 @@ func TestMPMCPtr128BasicOperations(t *testing.T) {
 	}
 }
 
+func TestMPMCPtr128RollsBackFullRingClaim(t *testing.T) {
+	const capacity = 2
+	const slots = 2 * capacity
+	q, tail := lfq.MPMCPtrWithAdmittedBurstForTest(capacity)
+	for range slots {
+		if err := q.Enqueue(nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := q.Enqueue(nil); !errors.Is(err, lfq.ErrWouldBlock) {
+		t.Fatalf("enqueue on full ring = %v, want ErrWouldBlock", err)
+	}
+	if got := tail(); got != slots {
+		t.Fatalf("tail after rejected enqueue = %d, want %d", got, slots)
+	}
+}
+
 func TestMPMCPtr128NilPointer(t *testing.T) {
 	q := lfq.NewMPMCPtr(4)
 
