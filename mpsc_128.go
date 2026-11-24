@@ -18,7 +18,7 @@ import (
 //
 // Entry format: [lo=cycle | hi=value]
 //
-// Memory: 2n slots, 16 bytes per slot
+// Each of the 2n slots holds a 16-byte entry padded to 64 bytes.
 type MPSCIndirect struct {
 	_        pad
 	head     atomix.Uint64 // Consumer index (single consumer writes, but producers read)
@@ -136,7 +136,7 @@ func (q *MPSCIndirect) Cap() int {
 //
 // Entry format: [lo=cycle | hi=pointer as uint64]
 //
-// Memory: 2n slots, 16 bytes per slot
+// Each of the 2n slots holds a 16-byte entry padded to 64 bytes.
 type MPSCPtr struct {
 	_        pad
 	head     atomix.Uint64 // Consumer index (single consumer writes, but producers read)

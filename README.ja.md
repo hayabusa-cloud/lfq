@@ -71,11 +71,11 @@ Atomix コンパイラは `atomix` の操作をインライン化します。CI 
 
 ## ベンチマーク
 
-CI では Linux の amd64 と arm64 の各マシンで `make bench-session` を実行します。Atomix コンパイラで同じターゲットを実行すると、`GOMAXPROCS=2` で各ベンチマークを 10 回測定できます。
+CI では Linux の amd64 と arm64 の実機で、Atomix コンパイラと `GOMAXPROCS=2` を使って `make bench-ci` を実行します。Actions のサマリーには、セッションの受け渡しと再試行、4 種類のキューそれぞれの enqueue/dequeue の組、複数のコンシューマが並行して取り出す SPMC について、各 10 回の測定の中央値を表示します。測定の生データはアーティファクトから取得できます。
 
 `Handoff` は、`sess` が使う容量 4 の SPSC データキューと同じ容量の Go のバッファ付きチャネルで、それぞれ 2 つの goroutine 間で値を 1 個受け渡します。どちらも満杯または空のときは `iox.Backoff` で待機します。`ns/op` は待機時間を含み、`waits/op` は値 1 個を渡す間に送受信側が待機した回数の合計です。
 
-`FullRetry` は、満杯のキューへの挿入が失敗し、値を 1 個取り出してから挿入に成功するまでを単一の goroutine で測定します。すべてのベンチマークを実行するには `make bench` を使います。
+`FullRetry` は、満杯のキューへの挿入が失敗し、値を 1 個取り出してから挿入に成功するまでを単一の goroutine で測定します。セッションに関する測定には `make bench-session`、すべてのベンチマークには `make bench` を使います。
 
 ## キュータイプ
 
@@ -177,9 +177,9 @@ q := lfq.NewMPMC[MyStruct](1024)
 q := lfq.NewMPMCIndirect(1024)
 q.Enqueue(uintptr(poolIndex))
 
-// ポインター - ゼロコピー
-q := lfq.NewMPMCPtr(1024)
-q.Enqueue(unsafe.Pointer(obj))
+// パッケージ変数のメッセージ配列内の要素を指すポインター
+q := lfq.NewMPMCPtr(len(messages))
+q.Enqueue(unsafe.Pointer(&messages[i]))
 ```
 
 ### コンパクトモード
@@ -196,7 +196,9 @@ q := lfq.New(4096).Compact().BuildIndirect()
 | デフォルト | FAA ベース | 2n | 高競合、スケーラビリティ |
 | コンパクト | CAS ベース | n | メモリ制約 |
 
-SPSC バリアントは既に n スロット（Lamport リングバッファ）を使用しており、Compact() を無視します。Compact() を使用した Indirect キューでは、値は 63 ビットに制限されます。`SPMCCompactIndirect` と `MPMCCompactIndirect` では、並行コンシューマーから観測され得る間、呼び出し側が値の一意性も保証する必要があります。マルチコンシューマーで重複した `uintptr` 値が必要な場合は、デフォルトの Indirect キューを使用してください。
+SPSC はすでに n スロットの Lamport リングバッファを使うため、`Compact()` を無視します。それ以外の構成では、`Compact().BuildIndirect()` が扱える値は 63 ビットまでです。`SPMCCompactIndirect` と `MPMCCompactIndirect` では、複数のコンシューマーが値を観測し得る間、その値が互いに異なることも必要です。
+
+複数のコンシューマーで重複する `uintptr` 値を扱う場合、プロデューサーが 1 つなら `NewSPMCIndirectSeq`、複数なら `NewMPMCIndirect` を使います。
 
 ## 操作
 
@@ -333,11 +335,11 @@ if d, ok := q.(lfq.Drainer); ok {
     d.Drain()
 }
 
-// コンシューマーは残りの全アイテムをドレインできる。
+// キューが空を返すまでデキューする。
 for {
     item, err := q.Dequeue()
     if err != nil {
-        break // キューが空
+        break
     }
     process(item)
 }

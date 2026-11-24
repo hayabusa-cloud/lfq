@@ -2685,9 +2685,8 @@ func TestDrainWithThresholdExhausted(t *testing.T) {
 	// SPMCPtr
 	t.Run("SPMCPtr", func(t *testing.T) {
 		q := lfq.NewSPMCPtr(cap)
-		values := [numItems]int{1, 2, 3}
 		for i := range numItems {
-			if err := q.Enqueue(unsafe.Pointer(&values[i])); err != nil {
+			if err := q.Enqueue(unsafe.Pointer(&packedPtrTestValues[i])); err != nil {
 				t.Fatalf("Enqueue(%d): %v", i, err)
 			}
 		}

@@ -886,12 +886,15 @@ func TestIndirectValuePreservationConcurrent(t *testing.T) {
 // Ptr Queue Specific Tests
 // =============================================================================
 
+// These four pointees have stable addresses throughout every handoff.
+var packedPtrTestValues = [...]int{100, 200, 300, 400}
+
 // TestPtrBasicOperation verifies Ptr queue behavior with valid pointers.
 func TestPtrBasicOperation(t *testing.T) {
 	q := lfq.NewMPMCPtr(8)
 
 	// Enqueue some valid pointers
-	vals := []int{1, 2, 3}
+	vals := packedPtrTestValues[:3]
 	for i := range vals {
 		q.Enqueue(unsafe.Pointer(&vals[i]))
 	}
@@ -1005,7 +1008,8 @@ func TestMPMCStressWithVerification(t *testing.T) {
 // Threshold Exhaustion Tests (Consolidated)
 // =============================================================================
 
-// TestThresholdExhaustion verifies the livelock prevention mechanism.
+// The FAA SPMC queues and generic MPMC queue bound empty retries with a
+// threshold. Packed MPMC queues report ErrWouldBlock on each empty dequeue.
 func TestThresholdExhaustion(t *testing.T) {
 	const cap = 4
 	// thresholdBudget = 3n - 1: maximum empty dequeues before ErrWouldBlock
@@ -1103,33 +1107,19 @@ func TestThresholdExhaustion(t *testing.T) {
 			}
 		}
 
-		var wouldBlockCount int
-		for i := 0; i < thresholdBudget+5; i++ {
-			_, err := q.Dequeue()
-			if err == lfq.ErrWouldBlock {
-				wouldBlockCount++
+		for range thresholdBudget + 5 {
+			if _, err := q.Dequeue(); err != lfq.ErrWouldBlock {
+				t.Fatalf("empty dequeue: got %v, want ErrWouldBlock", err)
 			}
 		}
-
-		if wouldBlockCount == 0 {
-			t.Fatal("Expected ErrWouldBlock after exhausting threshold")
-		}
-
-		_, err := q.Dequeue()
-		if err != lfq.ErrWouldBlock {
-			t.Fatalf("Expected ErrWouldBlock when threshold exhausted, got %v", err)
-		}
-
-		t.Logf("Threshold exhausted after %d ErrWouldBlock returns", wouldBlockCount)
 	})
 
 	// MPMCPtr
 	t.Run("MPMCPtr", func(t *testing.T) {
 		q := lfq.NewMPMCPtr(cap)
 
-		values := [cap]int{1, 2, 3, 4}
 		for i := range cap {
-			if err := q.Enqueue(unsafe.Pointer(&values[i])); err != nil {
+			if err := q.Enqueue(unsafe.Pointer(&packedPtrTestValues[i])); err != nil {
 				t.Fatalf("Initial enqueue(%d): %v", i, err)
 			}
 		}
@@ -1139,24 +1129,11 @@ func TestThresholdExhaustion(t *testing.T) {
 			}
 		}
 
-		var wouldBlockCount int
-		for i := 0; i < thresholdBudget+5; i++ {
-			_, err := q.Dequeue()
-			if err == lfq.ErrWouldBlock {
-				wouldBlockCount++
+		for range thresholdBudget + 5 {
+			if _, err := q.Dequeue(); err != lfq.ErrWouldBlock {
+				t.Fatalf("empty dequeue: got %v, want ErrWouldBlock", err)
 			}
 		}
-
-		if wouldBlockCount == 0 {
-			t.Fatal("Expected ErrWouldBlock after exhausting threshold")
-		}
-
-		_, err := q.Dequeue()
-		if err != lfq.ErrWouldBlock {
-			t.Fatalf("Expected ErrWouldBlock when threshold exhausted, got %v", err)
-		}
-
-		t.Logf("Threshold exhausted after %d ErrWouldBlock returns", wouldBlockCount)
 	})
 
 	// SPMCIndirect
@@ -1198,9 +1175,8 @@ func TestThresholdExhaustion(t *testing.T) {
 	t.Run("SPMCPtr", func(t *testing.T) {
 		q := lfq.NewSPMCPtr(cap)
 
-		values := [cap]int{1, 2, 3, 4}
 		for i := range cap {
-			if err := q.Enqueue(unsafe.Pointer(&values[i])); err != nil {
+			if err := q.Enqueue(unsafe.Pointer(&packedPtrTestValues[i])); err != nil {
 				t.Fatalf("Initial enqueue(%d): %v", i, err)
 			}
 		}

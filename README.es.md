@@ -71,11 +71,11 @@ El compilador Atomix integra en línea las operaciones de `atomix`. La CI ejecut
 
 ## Pruebas de rendimiento
 
-La CI ejecuta `make bench-session` en Linux nativo sobre amd64 y arm64. Ejecuta el mismo objetivo con el compilador Atomix para obtener diez muestras con `GOMAXPROCS=2`.
+La CI ejecuta `make bench-ci` en máquinas Linux amd64 y arm64 nativas con el compilador Atomix y `GOMAXPROCS=2`. El resumen de Actions muestra la mediana de diez muestras para la transferencia y el reintento de sesión, un par de operaciones de inserción y extracción en cada uno de los cuatro tipos de cola y SPMC con consumidores concurrentes. Los artefactos de la ejecución contienen las muestras originales.
 
 `Handoff` transfiere un valor entre dos goroutines mediante la cola de datos SPSC de cuatro posiciones que usa `sess` o un canal de Go con búfer de la misma capacidad. Ambos usan `iox.Backoff` cuando la cola está llena o vacía. `ns/op` incluye el tiempo de espera y `waits/op` cuenta las esperas de ambos extremos por valor entregado.
 
-`FullRetry` mide en una sola goroutine un intento fallido de insertar en una cola llena, una extracción y un nuevo intento de inserción que tiene éxito. Ejecuta `make bench` para medir todos los casos.
+`FullRetry` mide en una sola goroutine un intento fallido de insertar en una cola llena, una extracción y un nuevo intento de inserción que tiene éxito. Ejecuta `make bench-session` para medir los casos de sesión o `make bench` para ejecutar todos los benchmarks.
 
 ## Tipos de Cola
 
@@ -177,9 +177,9 @@ q := lfq.NewMPMC[MyStruct](1024)
 q := lfq.NewMPMCIndirect(1024)
 q.Enqueue(uintptr(poolIndex))
 
-// Puntero - sin copia
-q := lfq.NewMPMCPtr(1024)
-q.Enqueue(unsafe.Pointer(obj))
+// Puntero a un elemento de un array de mensajes declarado a nivel de paquete
+q := lfq.NewMPMCPtr(len(messages))
+q.Enqueue(unsafe.Pointer(&messages[i]))
 ```
 
 ### Modo Compacto
@@ -196,7 +196,9 @@ q := lfq.New(4096).Compact().BuildIndirect()
 | Predeterminado | Basado en FAA | 2n | Alta contención, escalabilidad |
 | Compacto | Basado en CAS | n | Memoria limitada |
 
-Las variantes SPSC ya usan n slots (buffer circular de Lamport) e ignoran Compact(). Para colas Indirect con Compact(), los valores están limitados a 63 bits. Para `SPMCCompactIndirect` y `MPMCCompactIndirect`, el llamador también debe asegurar que los valores sean distintos mientras puedan ser observados por consumidores concurrentes; use las colas indirectas predeterminadas cuando se requieran valores `uintptr` duplicados con acceso multi-consumidor.
+Las variantes SPSC ya usan n slots (búfer circular de Lamport) e ignoran `Compact()`. En las demás topologías, `Compact().BuildIndirect()` admite valores de 63 bits. `SPMCCompactIndirect` y `MPMCCompactIndirect` también requieren que los valores sean distintos mientras varios consumidores puedan observarlos.
+
+Para usar valores `uintptr` repetidos con varios consumidores, use `NewSPMCIndirectSeq` con un productor o `NewMPMCIndirect` con varios productores.
 
 ## Operaciones
 
@@ -333,11 +335,11 @@ if d, ok := q.(lfq.Drainer); ok {
     d.Drain()
 }
 
-// Los consumidores ahora pueden drenar todos los elementos restantes.
+// Extraer hasta que la cola indique que está vacía.
 for {
     item, err := q.Dequeue()
     if err != nil {
-        break // La cola está vacía
+        break
     }
     process(item)
 }

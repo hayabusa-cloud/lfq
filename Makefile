@@ -15,6 +15,7 @@
 #   make test                    # Test lfq with intrinsics compiler
 #   make bench                   # Run benchmarks
 #   make bench-session           # Measure session queue handoff and retry
+#   make bench-ci                # Reproduce the benchmarks reported by CI
 
 # Configuration
 export GOTOOLCHAIN := local
@@ -24,6 +25,7 @@ COMPILER_TAG     ?=
 COMPILER_DIR     ?= $(HOME)/sdk/$(or $(COMPILER_TAG),go1.27-atomix)
 GOROOT_INTRINSIC := $(COMPILER_DIR)
 GO_INTRINSIC     := $(GOROOT_INTRINSIC)/bin/go
+BENCH_FLAGS      ?= -timeout=30m
 
 # Auto-detect OS/ARCH for pre-built binaries
 GOOS_LOCAL   := $(shell uname -s | tr '[:upper:]' '[:lower:]')
@@ -96,15 +98,17 @@ test:
 	GOROOT="$(GOROOT_INTRINSIC)" "$(GO_INTRINSIC)" test -timeout 10m -v -covermode=atomic -coverprofile=coverage.out ./...
 	@echo "Tests passed"
 
-.PHONY: bench bench-session
+.PHONY: bench bench-session bench-ci
 bench:
 	$(require-compiler)
 	@echo "Running benchmarks with intrinsics compiler..."
-	GOROOT="$(GOROOT_INTRINSIC)" "$(GO_INTRINSIC)" test -run '^$$' -timeout 30m -bench=. -benchmem ./...
+	GOROOT="$(GOROOT_INTRINSIC)" "$(GO_INTRINSIC)" test -run '^$$' -bench=. -benchmem $(BENCH_FLAGS) ./...
 
-bench-session:
+bench-session: BENCH_PATTERN = ^BenchmarkSPSCSession
+bench-ci: BENCH_PATTERN = ^Benchmark(SPSCSession(Handoff|FullRetry)|(SPSC|MPSC|SPMC|MPMC)Indirect_SingleOp|SPMCIndirect_ParallelConsumers)$$
+bench-session bench-ci:
 	$(require-compiler)
-	GOROOT="$(GOROOT_INTRINSIC)" "$(GO_INTRINSIC)" test -run '^$$' -bench '^BenchmarkSPSCSession' -benchmem -benchtime=200ms -count=10 -cpu=2 -timeout=2m .
+	GOROOT="$(GOROOT_INTRINSIC)" "$(GO_INTRINSIC)" test -run '^$$' -bench '$(BENCH_PATTERN)' -benchmem -benchtime=200ms -count=10 -cpu=2 -timeout=2m .
 
 # ============================================================================
 # Cross-Compilation (for remote hardware testing)
@@ -165,6 +169,7 @@ help:
 	@echo "  test                    Run tests with coverage"
 	@echo "  bench                   Run benchmarks"
 	@echo "  bench-session           Measure session queue handoff and retry"
+	@echo "  bench-ci                Reproduce the benchmarks reported by CI"
 	@echo ""
 	@echo "Cross-Compilation:"
 	@echo "  test-binary-linux-amd64   Build test binary for linux/amd64"

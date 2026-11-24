@@ -71,11 +71,11 @@ Atomix 编译器会内联 `atomix` 操作。CI 使用标准 Go 编译器运行�
 
 ## 基准测试
 
-CI 在原生 Linux amd64 和 arm64 环境中运行 `make bench-session`。使用 Atomix 编译器运行同一目标，即可在 `GOMAXPROCS=2` 下采集十组样本。
+CI 在原生 Linux amd64 和 arm64 上使用 Atomix 编译器和 `GOMAXPROCS=2` 运行 `make bench-ci`。Actions 摘要显示每项基准十次采样的中位数，涵盖会话交接与重试、四种队列各执行一次入队和出队，以及 SPMC 多消费者并发出队。原始样本保存在工作流产物中。
 
 `Handoff` 在两个 goroutine 之间传递一个值，分别使用 `sess` 的四槽 SPSC 数据队列和相同容量的 Go 缓冲通道。两者在队列满或空时都使用 `iox.Backoff`。`ns/op` 包含等待时间，`waits/op` 表示每传递一个值时两端等待次数之和。
 
-`FullRetry` 在单个 goroutine 中测量向已满队列入队失败、出队一个值并成功重试入队的过程。运行 `make bench` 可执行全部基准测试。
+`FullRetry` 在单个 goroutine 中测量向已满队列入队失败、出队一个值并成功重试入队的过程。运行 `make bench-session` 可执行会话基准测试，运行 `make bench` 可执行全部基准测试。
 
 ## 队列类型
 
@@ -177,9 +177,9 @@ q := lfq.NewMPMC[MyStruct](1024)
 q := lfq.NewMPMCIndirect(1024)
 q.Enqueue(uintptr(poolIndex))
 
-// 指针 - 零拷贝
-q := lfq.NewMPMCPtr(1024)
-q.Enqueue(unsafe.Pointer(obj))
+// 指向包级消息数组中元素的指针
+q := lfq.NewMPMCPtr(len(messages))
+q.Enqueue(unsafe.Pointer(&messages[i]))
 ```
 
 ### 紧凑模式
@@ -196,7 +196,9 @@ q := lfq.New(4096).Compact().BuildIndirect()
 | 默认 | 基于 FAA | 2n | 高争用，可扩展性 |
 | 紧凑 | 基于 CAS | n | 内存受限 |
 
-SPSC 变体已使用 n 个槽位（Lamport 环形缓冲区），会忽略 Compact()。对于使用 Compact() 的 Indirect 队列，值限制为 63 位。对于 `SPMCCompactIndirect` 和 `MPMCCompactIndirect`，调用方还必须确保值在可能被并发消费者观察期间保持互异；如果多消费者访问需要重复的 `uintptr` 值，请使用默认 Indirect 队列。
+SPSC 变体已使用 n 个槽位的 Lamport 环形缓冲区，因此会忽略 `Compact()`。在其他拓扑中，`Compact().BuildIndirect()` 接受 63 位值。`SPMCCompactIndirect` 和 `MPMCCompactIndirect` 还要求，在多个消费者可能同时观察到这些值期间，各值必须互不相同。
+
+多个消费者需要处理重复的 `uintptr` 值时，单生产者使用 `NewSPMCIndirectSeq`，多生产者使用 `NewMPMCIndirect`。
 
 ## 操作
 
@@ -333,11 +335,11 @@ if d, ok := q.(lfq.Drainer); ok {
     d.Drain()
 }
 
-// 消费者现在可以消耗所有剩余项目。
+// 持续出队，直到队列报告为空。
 for {
     item, err := q.Dequeue()
     if err != nil {
-        break // 队列为空
+        break
     }
     process(item)
 }

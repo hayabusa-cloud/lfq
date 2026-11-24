@@ -13,15 +13,14 @@ import (
 
 // MPMCIndirectSeq is a CAS-based MPMC queue for uintptr values.
 //
-// Uses 128-bit atomic operations to pack sequence and value into a single
-// atomic entry, reducing atomics per operation from 2-3 to 1.
+// Each slot packs its sequence and value into one atomic entry.
 //
 // This is the Compact variant using n slots. Use NewMPMCIndirect for the
 // default FAA-based implementation with 2n slots and better scalability.
 //
 // Entry format: [lo=sequence | hi=value]
 //
-// Memory: n slots, 16 bytes per slot
+// Each of the n slots holds a 16-byte entry padded to 64 bytes.
 type MPMCIndirectSeq struct {
 	_        pad
 	tail     atomix.Uint64 // Producer index
@@ -125,15 +124,14 @@ func (q *MPMCIndirectSeq) Cap() int {
 
 // MPMCPtrSeq is a CAS-based MPMC queue for unsafe.Pointer values.
 //
-// Uses 128-bit atomic operations to pack sequence and pointer into a single
-// atomic entry, reducing atomics per operation from 2-3 to 1.
+// Each slot packs its sequence and pointer into one atomic entry.
 //
 // This is the Compact variant using n slots. Use NewMPMCPtr for the default
 // FAA-based implementation with 2n slots and better scalability.
 //
 // Entry format: [lo=sequence | hi=pointer as uint64]
 //
-// Memory: n slots, 16 bytes per slot
+// Each of the n slots holds a 16-byte entry padded to 64 bytes.
 type MPMCPtrSeq struct {
 	_        pad
 	tail     atomix.Uint64 // Producer index

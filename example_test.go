@@ -13,6 +13,7 @@ package lfq_test
 
 import (
 	"fmt"
+	"runtime"
 	"slices"
 	"sync"
 	"unsafe"
@@ -146,14 +147,17 @@ func ExampleNewMPMCPtr() {
 
 	q := lfq.NewMPMCPtr(8)
 
-	// Producer creates and enqueues messages
-	messages := []*Message{
+	messages := [...]Message{
 		{ID: 1, Data: "hello"},
 		{ID: 2, Data: "world"},
 	}
 
-	for msg := range slices.Values(messages) {
-		q.Enqueue(unsafe.Pointer(msg))
+	// Pin the whole array once for all handoffs.
+	var pin runtime.Pinner
+	pin.Pin(&messages)
+	defer pin.Unpin()
+	for i := range messages {
+		q.Enqueue(unsafe.Pointer(&messages[i]))
 	}
 
 	// Consumer receives pointers directly - no copy

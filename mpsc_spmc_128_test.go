@@ -93,7 +93,7 @@ func TestMPSCIndirect128Panic(t *testing.T) {
 func TestMPSCPtr128BasicOperations(t *testing.T) {
 	q := lfq.NewMPSCPtr(4)
 
-	vals := []int{100, 200, 300, 400}
+	vals := packedPtrTestValues[:]
 	for i := range vals {
 		if err := q.Enqueue(unsafe.Pointer(&vals[i])); err != nil {
 			t.Fatalf("enqueue %d: %v", i, err)
@@ -198,7 +198,7 @@ func TestSPMCIndirect128Panic(t *testing.T) {
 func TestSPMCPtr128BasicOperations(t *testing.T) {
 	q := lfq.NewSPMCPtr(4)
 
-	vals := []int{100, 200, 300, 400}
+	vals := packedPtrTestValues[:]
 	for i := range vals {
 		if err := q.Enqueue(unsafe.Pointer(&vals[i])); err != nil {
 			t.Fatalf("enqueue %d: %v", i, err)
@@ -210,8 +210,8 @@ func TestSPMCPtr128BasicOperations(t *testing.T) {
 		if err != nil {
 			t.Fatalf("dequeue %d: %v", i, err)
 		}
-		if *(*int)(ptr) != vals[i] {
-			t.Fatalf("dequeue %d: got %d, want %d", i, *(*int)(ptr), vals[i])
+		if want := unsafe.Pointer(&vals[i]); ptr != want {
+			t.Fatalf("dequeue %d: got %p, want %p", i, ptr, want)
 		}
 	}
 }

@@ -116,33 +116,31 @@ type ConsumerIndirect interface {
 
 // QueuePtr is the combined interface for unsafe.Pointer queues.
 //
-// QueuePtr passes pointers directly without copying. This enables zero-copy
-// transfer of objects between goroutines. The producer creates an object,
-// enqueues its pointer, and the consumer receives the same pointer.
-//
-// Ownership semantics: The producer transfers ownership to the consumer.
-// After enqueueing, the producer should not access the object.
+// A successful enqueue transfers ownership. The consumer receives the same
+// pointer. Packed pointer queues store address bits, so the caller must keep
+// each Go object live at a stable address until its consumer takes ownership.
 //
 // The interface intentionally excludes length because accurate counts in
 // lock-free algorithms require expensive cross-core synchronization.
 //
-// Example:
+// A package-level array provides stable storage. The producer may reuse a
+// slot after the consumer returns it.
 //
 //	type Message struct {
-//	    Data []byte
+//		Data []byte
 //	}
 //
-//	q := lfq.NewMPMCPtr(1024)
+//	var messages [1024]Message
+//	var q = lfq.NewMPMCPtr(len(messages))
 //
-//	// Producer
-//	msg := &Message{Data: largePayload}
-//	q.Enqueue(unsafe.Pointer(msg))
-//	// msg ownership transferred - do not use msg after this
+//	func publish(i int) error {
+//		return q.Enqueue(unsafe.Pointer(&messages[i]))
+//	}
 //
-//	// Consumer
-//	ptr, _ := q.Dequeue()
-//	msg := (*Message)(ptr)
-//	// msg is now owned by consumer
+//	func receive() (*Message, error) {
+//		ptr, err := q.Dequeue()
+//		return (*Message)(ptr), err
+//	}
 type QueuePtr interface {
 	ProducerPtr
 	ConsumerPtr
@@ -181,7 +179,7 @@ type ConsumerPtr interface {
 //	if d, ok := q.(lfq.Drainer); ok {
 //	    d.Drain()
 //	}
-//	// Consumers can now drain all remaining items
+//	// Consumers can now dequeue with the threshold disabled.
 type Drainer interface {
 	// Drain signals that no more enqueues will occur.
 	// Consumers may continue dequeuing until the queue is empty.

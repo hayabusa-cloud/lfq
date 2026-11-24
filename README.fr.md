@@ -71,11 +71,11 @@ Le compilateur Atomix développe en ligne les opérations d’`atomix`. La CI ex
 
 ## Mesures de performance
 
-La CI exécute `make bench-session` sous Linux, sur des machines amd64 et arm64 natives. Exécutez la même cible avec le compilateur Atomix pour obtenir dix échantillons avec `GOMAXPROCS=2`.
+La CI exécute `make bench-ci` sur des machines Linux amd64 et arm64 natives avec le compilateur Atomix et `GOMAXPROCS=2`. Le récapitulatif Actions donne la médiane de dix mesures pour le transfert de session et la nouvelle tentative, pour une insertion suivie d’un retrait sur chacun des quatre types de files, et pour SPMC avec plusieurs consommateurs concurrents. Les artefacts contiennent les mesures brutes.
 
 `Handoff` transmet une valeur entre deux goroutines au moyen de la file de données SPSC à quatre places utilisée par `sess` ou d’un canal Go doté d’un tampon de même capacité. Les deux utilisent `iox.Backoff` quand la file est pleine ou vide. `ns/op` inclut le temps d’attente et `waits/op` compte les attentes des deux côtés pour chaque valeur transmise.
 
-`FullRetry` mesure dans une seule goroutine une tentative d’insertion dans une file pleine, le retrait d’une valeur et la réussite d’une nouvelle tentative d’insertion. Exécutez `make bench` pour lancer tous les benchmarks.
+`FullRetry` mesure dans une seule goroutine une tentative d’insertion dans une file pleine, le retrait d’une valeur et la réussite d’une nouvelle tentative d’insertion. Exécutez `make bench-session` pour les cas de session ou `make bench` pour tous les benchmarks.
 
 ## Types de Files
 
@@ -177,9 +177,9 @@ q := lfq.NewMPMC[MyStruct](1024)
 q := lfq.NewMPMCIndirect(1024)
 q.Enqueue(uintptr(poolIndex))
 
-// Pointeur - sans copie
-q := lfq.NewMPMCPtr(1024)
-q.Enqueue(unsafe.Pointer(obj))
+// Pointeur vers un élément d’un tableau de messages déclaré au niveau du paquet
+q := lfq.NewMPMCPtr(len(messages))
+q.Enqueue(unsafe.Pointer(&messages[i]))
 ```
 
 ### Mode Compact
@@ -196,7 +196,9 @@ q := lfq.New(4096).Compact().BuildIndirect()
 | Par défaut | Basé sur FAA | 2n | Haute contention, évolutivité |
 | Compact | Basé sur CAS | n | Mémoire limitée |
 
-Les variantes SPSC utilisent déjà n emplacements (buffer circulaire de Lamport) et ignorent Compact(). Pour les files Indirect avec Compact(), les valeurs sont limitées à 63 bits. Pour `SPMCCompactIndirect` et `MPMCCompactIndirect`, l'appelant doit aussi garantir que les valeurs restent distinctes tant qu'elles peuvent être observées par des consommateurs concurrents; utilisez les files indirectes par défaut lorsque des valeurs `uintptr` dupliquées sont requises avec un accès multi-consommateur.
+Les variantes SPSC utilisent déjà n emplacements (tampon circulaire de Lamport) et ignorent `Compact()`. Pour les autres topologies, `Compact().BuildIndirect()` accepte des valeurs sur 63 bits. `SPMCCompactIndirect` et `MPMCCompactIndirect` exigent aussi que les valeurs restent distinctes tant que plusieurs consommateurs peuvent les observer.
+
+Pour utiliser des valeurs `uintptr` identiques avec plusieurs consommateurs, utilisez `NewSPMCIndirectSeq` avec un seul producteur ou `NewMPMCIndirect` avec plusieurs producteurs.
 
 ## Opérations
 
@@ -333,11 +335,11 @@ if d, ok := q.(lfq.Drainer); ok {
     d.Drain()
 }
 
-// Les consommateurs peuvent maintenant drainer tous les éléments restants.
+// Retirer les éléments jusqu’à ce que la file se déclare vide.
 for {
     item, err := q.Dequeue()
     if err != nil {
-        break // La file est vide
+        break
     }
     process(item)
 }

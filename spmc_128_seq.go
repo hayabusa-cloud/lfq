@@ -17,7 +17,7 @@ import (
 //
 // Entry format: [lo=sequence | hi=value]
 //
-// Memory: 16 bytes per slot (sequence + value in single Uint128)
+// Each slot holds a 16-byte entry padded to 64 bytes.
 type SPMCIndirectSeq struct {
 	_        pad
 	head     atomix.Uint64 // Consumers CAS here
@@ -109,7 +109,7 @@ func (q *SPMCIndirectSeq) Cap() int {
 //
 // Entry format: [lo=sequence | hi=pointer as uint64]
 //
-// Memory: 16 bytes per slot
+// Each slot holds a 16-byte entry padded to 64 bytes.
 type SPMCPtrSeq struct {
 	_        pad
 	head     atomix.Uint64 // Consumers CAS here
