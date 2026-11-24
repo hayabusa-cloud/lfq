@@ -80,23 +80,20 @@ type Consumer[T any] interface {
 // The interface intentionally excludes length because accurate counts in
 // lock-free algorithms require expensive cross-core synchronization.
 //
-// Example (buffer pool):
+// In this SPSC pool, one goroutine borrows buffers and one returns them.
+// After the last use of a buffer, return its index exactly once.
 //
 //	pool := make([][]byte, 1024)
-//	freeList := lfq.NewSPSCIndirect(1024)
-//
-//	// Initialize pool
+//	freeList := lfq.NewSPSCIndirect(len(pool))
 //	for i := range pool {
-//	    pool[i] = make([]byte, 4096)
-//	    freeList.Enqueue(uintptr(i))
+//		pool[i] = make([]byte, 4096)
+//		freeList.Enqueue(uintptr(i))
 //	}
 //
-//	// Allocate
-//	idx, _ := freeList.Dequeue()
-//	buf := pool[idx]
-//
-//	// Free
-//	freeList.Enqueue(idx)
+//	if idx, err := freeList.Dequeue(); err == nil {
+//		copy(pool[idx], "hello")
+//		freeList.Enqueue(idx)
+//	}
 type QueueIndirect interface {
 	ProducerIndirect
 	ConsumerIndirect
@@ -174,10 +171,9 @@ type ConsumerPtr interface {
 // Call Drain after all producers have finished to allow consumers to
 // drain remaining items without threshold blocking.
 //
-// For multi-consumer queues (SPMC, MPMC), Drain causes Dequeue to skip
-// threshold checks. For single-consumer queues (MPSC), Drain is a
-// graceful shutdown signal — MPSC has no threshold mechanism, so the
-// effect is limited to signaling that no further enqueues will occur.
+// The FAA SPMC queues and generic FAA MPMC queue skip their dequeue
+// threshold after Drain. MPMCIndirect and MPMCPtr can always drain
+// published values.
 //
 // Example:
 //
@@ -188,9 +184,7 @@ type ConsumerPtr interface {
 //	// Consumers can now drain all remaining items
 type Drainer interface {
 	// Drain signals that no more enqueues will occur.
-	// After Drain is called, multi-consumer Dequeue skips threshold
-	// checks, allowing consumers to drain all remaining items without
-	// producer pressure. For MPSC, Drain serves as a shutdown signal.
+	// Consumers may continue dequeuing until the queue is empty.
 	//
 	// Drain is a hint — the caller must ensure no further Enqueue calls
 	// will be made after calling Drain.

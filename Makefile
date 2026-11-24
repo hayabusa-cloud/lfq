@@ -4,22 +4,24 @@
 # to compile as single CPU instructions instead of function calls.
 #
 # Prerequisites:
-#   - curl (for downloading pre-built compiler)
+#   - curl and jq (for release discovery)
 #   - tar and shasum (for extraction and integrity checks)
 #   - Linux (or WSL2 on Windows) / macOS
 #
 # Usage:
-#   make install-compiler        # Install the latest Atomix compiler release
+#   make install-compiler        # Install the latest Go 1.27.x Atomix compiler
 #   make install-compiler-source # Build the release from source
 #   make build                   # Build lfq with intrinsics compiler
 #   make test                    # Test lfq with intrinsics compiler
 #   make bench                   # Run benchmarks
+#   make bench-session           # Measure session queue handoff and retry
 
 # Configuration
 export GOTOOLCHAIN := local
 COMPILER_REPO    := https://github.com/hayabusa-cloud/go
+COMPILER_RELEASES_API ?= https://api.github.com/repos/$(patsubst https://github.com/%,%,$(COMPILER_REPO))/releases
 COMPILER_TAG     ?=
-COMPILER_DIR     ?= $(HOME)/sdk/$(or $(COMPILER_TAG),go-atomix)
+COMPILER_DIR     ?= $(HOME)/sdk/$(or $(COMPILER_TAG),go1.27-atomix)
 GOROOT_INTRINSIC := $(COMPILER_DIR)
 GO_INTRINSIC     := $(GOROOT_INTRINSIC)/bin/go
 
@@ -50,8 +52,7 @@ install-compiler install-compiler-source:
 	@set -eu; dir="$(COMPILER_DIR)"; tag="$(COMPILER_TAG)"; \
 	parent=$$(dirname "$$dir"); dir="$$parent/$$(basename "$$dir")"; dest="$$dir"; \
 	if test -z "$$tag"; then \
-		release=$$(curl -fsSIL -o /dev/null -w '%{url_effective}' "$(COMPILER_REPO)/releases/latest"); \
-		tag=$${release##*/}; dest="$$parent/$$tag"; \
+		tag=$$(bash scripts/compiler-version.sh atomix "$(COMPILER_RELEASES_API)"); dest="$$parent/$$tag"; \
 	fi; \
 	matches_tag() { test -x "$$1/bin/go" && test -f "$$1/VERSION" && test "$$(head -n 1 "$$1/VERSION")" = "$$tag"; }; \
 	if matches_tag "$$dir"; then exit 0; fi; \
@@ -69,7 +70,8 @@ install-compiler install-compiler-source:
 		tar -xzf "$$tmp/$$archive" -C "$$tmp"; \
 		test "$$(head -n 1 "$$tmp/go/VERSION")" = "$$tag"; \
 		if test "$@" = install-compiler-source; then \
-			bootstrap=$$(GOWORK=off go env GOROOT); (cd "$$tmp/go/src" && GOWORK=off GOROOT_BOOTSTRAP="$$bootstrap" ./make.bash); \
+			bootstrap=$$(bash scripts/compiler-version.sh bootstrap); \
+			(cd "$$tmp/go/src" && GOWORK=off GOROOT_BOOTSTRAP="$$bootstrap" ./make.bash); \
 		fi; \
 		test -x "$$tmp/go/bin/go"; mv "$$tmp/go" "$$dest"; \
 	fi; \
@@ -94,11 +96,15 @@ test:
 	GOROOT="$(GOROOT_INTRINSIC)" "$(GO_INTRINSIC)" test -timeout 10m -v -covermode=atomic -coverprofile=coverage.out ./...
 	@echo "Tests passed"
 
-.PHONY: bench
+.PHONY: bench bench-session
 bench:
 	$(require-compiler)
 	@echo "Running benchmarks with intrinsics compiler..."
-	GOROOT="$(GOROOT_INTRINSIC)" "$(GO_INTRINSIC)" test -timeout 30m -bench=. -benchmem ./...
+	GOROOT="$(GOROOT_INTRINSIC)" "$(GO_INTRINSIC)" test -run '^$$' -timeout 30m -bench=. -benchmem ./...
+
+bench-session:
+	$(require-compiler)
+	GOROOT="$(GOROOT_INTRINSIC)" "$(GO_INTRINSIC)" test -run '^$$' -bench '^BenchmarkSPSCSession' -benchmem -benchtime=200ms -count=10 -cpu=2 -timeout=2m .
 
 # ============================================================================
 # Cross-Compilation (for remote hardware testing)
@@ -150,7 +156,7 @@ help:
 	@echo "lfq Makefile - Build with intrinsics-customized Go compiler"
 	@echo ""
 	@echo "Compiler:"
-	@echo "  install-compiler        Download the latest Atomix compiler or the release selected by COMPILER_TAG"
+	@echo "  install-compiler        Download the latest Go 1.27.x Atomix compiler or the release selected by COMPILER_TAG"
 	@echo "  install-compiler-source Build the same release from source"
 	@echo "  check-compiler          Verify compiler installation"
 	@echo ""
@@ -158,6 +164,7 @@ help:
 	@echo "  build                   Build with intrinsics compiler (includes vet)"
 	@echo "  test                    Run tests with coverage"
 	@echo "  bench                   Run benchmarks"
+	@echo "  bench-session           Measure session queue handoff and retry"
 	@echo ""
 	@echo "Cross-Compilation:"
 	@echo "  test-binary-linux-amd64   Build test binary for linux/amd64"

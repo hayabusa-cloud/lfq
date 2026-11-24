@@ -4,6 +4,9 @@
 
 // Package lfq provides bounded FIFO queue implementations.
 //
+// The primary targets are native Linux 6.18 or later on amd64 and on arm64
+// with LSE2. Production builds and benchmarks use the Atomix Go compiler.
+//
 // The package offers multiple queue variants optimized for different
 // producer/consumer patterns:
 //
@@ -83,19 +86,27 @@
 //	// Multiple producers (event sources)
 //	for sensor := range slices.Values(sensors) {
 //	    go func(s Sensor) {
+//	        var backoff iox.Backoff
 //	        for ev := range s.Events() {
-//	            q.Enqueue(&ev)
+//	            for q.Enqueue(&ev) != nil {
+//	                backoff.Wait()
+//	            }
+//	            backoff.Reset()
 //	        }
 //	    }(sensor)
 //	}
 //
 //	// Single consumer (aggregator)
 //	go func() {
+//	    var backoff iox.Backoff
 //	    for {
 //	        ev, err := q.Dequeue()
-//	        if err == nil {
-//	            aggregate(ev)
+//	        if err != nil {
+//	            backoff.Wait()
+//	            continue
 //	        }
+//	        backoff.Reset()
+//	        aggregate(ev)
 //	    }
 //	}()
 //
@@ -118,11 +129,15 @@
 //	// Multiple consumers (workers)
 //	for range numWorkers {
 //	    go func() {
+//	        var backoff iox.Backoff
 //	        for {
 //	            task, err := q.Dequeue()
-//	            if err == nil {
-//	                task.Execute()
+//	            if err != nil {
+//	                backoff.Wait()
+//	                continue
 //	            }
+//	            backoff.Reset()
+//	            task.Execute()
 //	        }
 //	    }()
 //	}
@@ -135,11 +150,15 @@
 //	// Workers
 //	for range numWorkers {
 //	    go func() {
+//	        var backoff iox.Backoff
 //	        for {
 //	            job, err := q.Dequeue()
-//	            if err == nil {
-//	                job.Run()
+//	            if err != nil {
+//	                backoff.Wait()
+//	                continue
 //	            }
+//	            backoff.Reset()
+//	            job.Run()
 //	        }
 //	    }()
 //	}
@@ -157,24 +176,21 @@
 //	BuildIndirect() - Queue for uintptr values (pool indices, handles)
 //	BuildPtr()      - Queue for unsafe.Pointer (zero-copy pointer passing)
 //
-// When to use Indirect:
+// Use [SPSCIndirect] to track free buffer indices. One goroutine borrows buffers
+// and one returns them. Return each borrowed index exactly once after its
+// buffer's last use.
 //
-//	// Buffer pool with index-based access
 //	pool := make([][]byte, 1024)
-//	freeList := lfq.NewSPSCIndirect(1024)
-//
-//	// Initialize free list with buffer indices
+//	freeList := lfq.NewSPSCIndirect(len(pool))
 //	for i := range pool {
-//	    pool[i] = make([]byte, 4096)
-//	    freeList.Enqueue(uintptr(i))
+//		pool[i] = make([]byte, 4096)
+//		freeList.Enqueue(uintptr(i))
 //	}
 //
-//	// Allocate: get index from free list
-//	idx, err := freeList.Dequeue()
-//	buf := pool[idx]
-//
-//	// Free: return index to free list
-//	freeList.Enqueue(idx)
+//	if idx, err := freeList.Dequeue(); err == nil {
+//		copy(pool[idx], "hello")
+//		freeList.Enqueue(idx)
+//	}
 //
 // When to use Ptr:
 //
@@ -294,9 +310,8 @@
 //
 // # Graceful Shutdown
 //
-// FAA-based queues (MPMC, SPMC, MPSC) include a threshold mechanism to prevent
-// livelock. This mechanism may cause Dequeue to return [ErrWouldBlock] even when
-// items remain, waiting for producer activity to reset the threshold.
+// The generic FAA MPMC queue and the FAA SPMC queues use a dequeue threshold.
+// MPMCIndirect and MPMCPtr can always drain published values.
 //
 // For graceful shutdown scenarios where producers have finished but consumers
 // need to drain remaining items, use the [Drainer] interface:
@@ -312,31 +327,19 @@
 //	// Consumers can now drain all remaining items
 //	// without threshold blocking
 //
-// After Drain is called, Dequeue skips threshold checks, allowing consumers
-// to fully drain the queue. Drain is a hint — the caller must ensure no
-// further Enqueue calls will be made.
+// Drain disables the dequeue threshold on queues that use one. The caller
+// must ensure no further Enqueue calls will be made.
 //
 // SPSC queues do not implement [Drainer] as they have no threshold mechanism.
 // The type assertion naturally handles this case.
 //
 // # Race Detection
 //
-// Go's race detector is not designed for lock-free algorithm verification.
-// The race detector tracks explicit synchronization primitives (mutex, channels,
-// WaitGroup) but cannot observe happens-before relationships established through
-// atomic memory orderings (acquire-release semantics).
-//
-// Lock-free queues use sequence numbers with acquire-release semantics to
-// protect non-atomic data fields. These algorithms are correct, but the race
-// detector may report false positives because it cannot track synchronization
-// provided by atomic operations on separate variables.
-//
-// For lock-free algorithm correctness verification, use:
-//   - Formal verification tools (TLA+, SPIN)
-//   - Stress testing without race detector
-//   - Memory model analysis
-//
-// Tests incompatible with race detection are excluded via //go:build !race.
+// Go's race detector cannot observe all synchronization in atomix assembly.
+// Run go test -race ./... for the instrumented tests. Run go test ./... to
+// include the concurrent tests that check [RaceEnabled] and the examples
+// excluded by the !race build constraint. Lock-free progress requires a
+// separate proof.
 //
 // # Dependencies
 //

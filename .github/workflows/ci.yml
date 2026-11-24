@@ -1,10 +1,5 @@
 name: CI
 
-# NOTE: This package uses atomix which requires the intrinsics-optimized
-# Go compiler (github.com/hayabusa-cloud/go) for optimal
-# performance. Standard Go compiler is used here for fast CI feedback.
-# See benchmark-intrinsics job for performance validation.
-
 on:
   push:
     branches: [main]
@@ -48,12 +43,13 @@ jobs:
             runs-on: macos-latest
             go-version: 'stable'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.go-version }}
+          check-latest: true
           cache: true
 
       - name: Verify dependencies
@@ -84,7 +80,7 @@ jobs:
 
       - name: Upload coverage to Codecov
         if: matrix.name == 'linux/amd64 (stable)'
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           files: coverage.out
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -109,12 +105,13 @@ jobs:
           - goos: darwin
             goarch: arm64
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version: '1.27.x'
+          check-latest: true
           cache: true
 
       - name: Cross-build
@@ -128,10 +125,12 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ github.event.inputs.run_intrinsics_benchmark == 'true' }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install the release compiler
-        run: make install-compiler COMPILER_DIR="$RUNNER_TEMP/go-atomix"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: make install-compiler check-compiler COMPILER_DIR="$RUNNER_TEMP/go-atomix"
 
       - name: Run benchmarks with intrinsics
         run: make bench COMPILER_DIR="$RUNNER_TEMP/go-atomix"

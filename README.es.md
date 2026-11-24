@@ -1,11 +1,11 @@
 # lfq
 
 [![Go Reference](https://pkg.go.dev/badge/code.hybscloud.com/lfq.svg)](https://pkg.go.dev/code.hybscloud.com/lfq)
-[![Go Report Card](https://goreportcard.com/badge/github.com/hayabusa-cloud/lfq)](https://goreportcard.com/report/github.com/hayabusa-cloud/lfq)
+[![Benchmarks](https://github.com/hayabusa-cloud/lfq/actions/workflows/benchmarks.yml/badge.svg)](https://github.com/hayabusa-cloud/lfq/actions/workflows/benchmarks.yml)
 [![Codecov](https://codecov.io/gh/hayabusa-cloud/lfq/graph/badge.svg)](https://codecov.io/gh/hayabusa-cloud/lfq)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**Idiomas:** [English](README.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md) | Español | [Français](README.fr.md)
+**Idiomas:** [English](README.md) | [简体中文](README.zh-CN.md) | Español | [日本語](README.ja.md) | [Français](README.fr.md)
 
 Implementaciones de colas FIFO sin bloqueo y sin espera para Go.
 
@@ -18,11 +18,11 @@ El paquete `lfq` proporciona colas FIFO limitadas libres de bloqueos (lock-free)
 `lfq` se basa en investigaciones fundamentales de concurrencia para superar las limitaciones de los mutex tradicionales y los bucles CAS (Compare-And-Swap):
 
 - **Buffer Circular de Lamport (1977)**: Impulsa nuestras rutas de Productor Único/Consumidor Único (SPSC), ofreciendo una latencia estrictamente de $O(1)$ libre de esperas sin costosas instrucciones atómicas de lectura-modificación-escritura.
-- **Scalable Circular Queue (SCQ, 2019)**: Nuestras rutas multipartitas (MPSC, SPMC, MPMC) están implementadas basándose en el algoritmo SCQ de Ruslan Nikolaev. Al utilizar instrucciones de hardware Fetch-And-Add (FAA) en lugar de bucles CAS, `lfq` evita inherentemente los cuellos de botella por contención y los problemas ABA, operando como una cola independiente sin mecanismos externos de recuperación segura de memoria (ej. hazard pointers).
+- **Scalable Circular Queue (SCQ, 2019)**. El algoritmo SCQ de Ruslan Nikolaev es la base de las colas FAA genéricas.
 
 ### Los Stacks de I/O No Bloqueantes de `iox`
 
-`lfq` está diseñado para stacks de I/O no bloqueantes basados en `iox`. Evita el bloqueo implícito en tiempo de ejecución a favor de la contrapresión (backpressure) explícita. Si una cola está llena o vacía, devuelve inmediatamente `ErrWouldBlock`. Este modelo de error conciso se integra perfectamente con bucles de eventos y primitivas de retroceso (como `iox.Backoff`), permitiendo una gestión de tráfico predecible y límites de latencia sub-microsegundos.
+Cuando una operación devuelve `ErrWouldBlock`, el bucle de eventos puede atender otras tareas y reintentar más tarde. Quien llama de forma síncrona puede esperar con `iox.Backoff`.
 
 ```go
 // Constructor directo (recomendado para la mayoría de casos)
@@ -45,7 +45,7 @@ go get code.hybscloud.com/lfq
 
 ### Requisito del Compilador
 
-Para un mejor rendimiento, compile con el [compilador Go optimizado con intrínsecos](https://github.com/hayabusa-cloud/go):
+Usa el compilador Atomix Go para las compilaciones de producción y las pruebas de rendimiento. [Atomix Go](https://github.com/hayabusa-cloud/go)
 
 ```bash
 # Usando Makefile (recomendado)
@@ -57,17 +57,25 @@ make test               # Probar con el compilador de intrínsecos
 make install-compiler-source
 ```
 
-Ambos objetivos de instalación usan la última versión publicada de forma predeterminada. Exporte `COMPILER_TAG` para seleccionar una versión concreta.
+Ambos objetivos de instalación usan por defecto la última versión publicada del compilador Atomix para Go 1.27.x. Exporta `COMPILER_TAG` para seleccionar una versión concreta. La búsqueda de versiones usa `jq` y admite la autenticación en GitHub con `GH_TOKEN`. Para compilar desde las fuentes, usa la última versión oficial de Go 1.27.x en `PATH`.
 
-Para la instalación manual, descargue el archivo para su plataforma y verifíquelo con el archivo `SHA256SUMS` de la misma versión. Coloque el directorio `go` extraído en `$HOME/sdk/${COMPILER_TAG:-go-atomix}`. [Versiones del compilador](https://github.com/hayabusa-cloud/go/releases)
+Para la instalación manual, descargue el archivo para su plataforma y verifíquelo con el archivo `SHA256SUMS` de la misma versión. Coloque el directorio `go` extraído en `$HOME/sdk/${COMPILER_TAG:-go1.27-atomix}`. [Versiones del compilador](https://github.com/hayabusa-cloud/go/releases)
 
 ```bash
 # Compilar una aplicación que usa lfq
-compiler="$HOME/sdk/${COMPILER_TAG:-go-atomix}"
+compiler="$HOME/sdk/${COMPILER_TAG:-go1.27-atomix}"
 GOTOOLCHAIN=local GOROOT="$compiler" "$compiler/bin/go" build ./...
 ```
 
-El compilador de intrínsecos incorpora las operaciones de atomix con el ordenamiento de memoria correcto. El compilador Go estándar funciona para pruebas básicas pero puede presentar problemas bajo alta contención.
+El compilador Atomix integra en línea las operaciones de `atomix`. La CI ejecuta las pruebas de corrección con el compilador estándar de Go.
+
+## Pruebas de rendimiento
+
+La CI ejecuta `make bench-session` en Linux nativo sobre amd64 y arm64. Ejecuta el mismo objetivo con el compilador Atomix para obtener diez muestras con `GOMAXPROCS=2`.
+
+`Handoff` transfiere un valor entre dos goroutines mediante la cola de datos SPSC de cuatro posiciones que usa `sess` o un canal de Go con búfer de la misma capacidad. Ambos usan `iox.Backoff` cuando la cola está llena o vacía. `ns/op` incluye el tiempo de espera y `waits/op` cuenta las esperas de ambos extremos por valor entregado.
+
+`FullRetry` mide en una sola goroutine un intento fallido de insertar en una cola llena, una extracción y un nuevo intento de inserción que tiene éxito. Ejecuta `make bench` para medir todos los casos.
 
 ## Tipos de Cola
 
@@ -101,7 +109,7 @@ elem, err := q.Dequeue()  // Sin espera O(1)
 
 ### MPSC/SPMC/MPMC: Basado en FAA (Predeterminado)
 
-Por defecto, las colas de acceso múltiple implementan el algoritmo SCQ (Cola Circular Escalable) utilizando instrucciones FAA (Fetch-And-Add). FAA incrementa ciegamente los contadores de posición, requiriendo 2n slots físicos para capacidad n, pero escala mejor bajo alta contención que las alternativas basadas en CAS.
+Las colas de acceso múltiple predeterminadas reservan posiciones mediante fetch-and-add (FAA) en un anillo de `2n` ranuras. En `MPMCIndirect` y `MPMCPtr`, los participantes publican y retiran los valores en posiciones consecutivas. Si quien reservó la siguiente posición se detiene, otro participante puede utilizarla.
 
 - **Compensación**: Requiere `2n` slots físicos para una capacidad nominal `n`.
 - **Capacidad transitoria**: Con `P` productores concurrentes, hasta `P-1` elementos adicionales pueden encolarse transitoriamente por encima de `Cap()` antes de que aplique la contrapresión.
@@ -123,10 +131,10 @@ La validación de slots basada en ciclos proporciona seguridad ABA sin contadore
 
 Las variantes de cola Indirect y Ptr (todas las variantes no SPSC excepto Compact Indirect) empaquetan el número de secuencia y la carga útil en una sola operación atómica de 128 bits. Esto reduce la contención de línea de caché y mejora el rendimiento bajo alta concurrencia.
 
-Para las variantes Ptr que codifican punteros en slots de 128 bits (variantes FAA y PtrSeq), mantén una referencia Go tipada a los objetos encolados hasta que se desencolen (o se garantice su consumo). No dependas solo de los bits de puntero almacenados en la cola como raíz de alcanzabilidad del GC.
+Para las variantes Ptr que codifican punteros en ranuras de 128 bits (FAA y PtrSeq), conserva una referencia tipada a cada objeto Go y mantén estable su dirección hasta que el consumidor asuma su propiedad.
 
 ```go
-// Indirect - una operación atómica de 128 bits por operación
+// Indirect guarda la secuencia y el valor en un par atómico.
 q := lfq.NewMPMCIndirect(4096)
 
 // Ptr - misma optimización para unsafe.Pointer
@@ -218,46 +226,45 @@ Los siguientes patrones demuestran cómo se puede integrar `lfq` en sistemas con
 
 ### Pool de Búferes
 
-Un patrón común para I/O sin asignaciones es preasignar un grupo de búferes y rastrear sus índices disponibles utilizando una cola SPSC libre de esperas. Esto elimina por completo la presión del recolector de basura (GC).
+Una sola goroutine toma búferes del pool y una sola los devuelve. Cada llamada a `alloc` que tiene éxito deja sitio en la lista libre. Tras el último uso del búfer, llama a `free` exactamente una vez para devolver su índice.
 
 ```go
 const poolSize = 1024
 const bufSize = 4096
 
-// Pre-asignar buffers
 pool := make([][]byte, poolSize)
+freeList := lfq.NewSPSCIndirect(len(pool))
 for i := range pool {
-    pool[i] = make([]byte, bufSize)
+	pool[i] = make([]byte, bufSize)
+	freeList.Enqueue(uintptr(i))
 }
 
-// Lista libre rastrea índices disponibles
-freeList := lfq.NewSPSCIndirect(poolSize)
-for i := range poolSize {
-    freeList.Enqueue(uintptr(i))
+alloc := func() ([]byte, uintptr, bool) {
+	idx, err := freeList.Dequeue()
+	if err != nil {
+		return nil, 0, false
+	}
+	return pool[idx], idx, true
+}
+free := func(idx uintptr) {
+	freeList.Enqueue(idx)
 }
 
-// Asignar
-func Alloc() ([]byte, uintptr, bool) {
-    idx, err := freeList.Dequeue()
-    if err != nil {
-        return nil, 0, false
-    }
-    return pool[idx], idx, true
-}
-
-// Liberar
-func Free(idx uintptr) {
-    freeList.Enqueue(idx)
+if buf, idx, ok := alloc(); ok {
+	copy(buf, "hello")
+	free(idx)
 }
 ```
 
 ### Agregación de Eventos
 
+El agregador funciona mientras el servicio está activo. Cada productor conserva la lectura actual hasta que la cola la acepta.
+
 ```go
 type Event struct {
-    Source    string
-    Timestamp time.Time
-    Data      any
+	Source    string
+	Timestamp time.Time
+	Data      any
 }
 
 // Múltiples fuentes → Procesador único
@@ -265,49 +272,57 @@ events := lfq.NewMPSC[Event](8192)
 
 // Fuentes de eventos (múltiples productores)
 for sensor := range slices.Values(sensors) {
-    go func(s Sensor) {
-        for reading := range s.Readings() {
-            ev := Event{
-                Source:    s.Name(),
-                Timestamp: time.Now(),
-                Data:      reading,
-            }
-            events.Enqueue(&ev)
-        }
-    }(sensor)
+	go func(s Sensor) {
+		var backoff iox.Backoff
+		for reading := range s.Readings() {
+			ev := Event{
+				Source:    s.Name(),
+				Timestamp: time.Now(),
+				Data:      reading,
+			}
+			for events.Enqueue(&ev) != nil {
+				backoff.Wait()
+			}
+			backoff.Reset()
+		}
+	}(sensor)
 }
 
 // Agregador único (consumidor único)
 go func() {
-    for {
-        ev, err := events.Dequeue()
-        if err == nil {
-            aggregate(ev)
-        }
-    }
+	var backoff iox.Backoff
+	for {
+		ev, err := events.Dequeue()
+		if err != nil {
+			backoff.Wait()
+			continue
+		}
+		backoff.Reset()
+		aggregate(ev)
+	}
 }()
 ```
 
 ### Manejo de Contrapresión
 
-```go
-// Enqueue con reintento y yield
-func EnqueueWithRetry(q lfq.Queue[Item], item Item, maxRetries int) bool {
-	ba := iox.Backoff{}
-    for i := range maxRetries {
-        if q.Enqueue(&item) == nil {
-            return true
-        }
-        ba.Wait() // Ceder para permitir que los consumidores drenen
-    }
-    return false // Aplicar contrapresión al llamador
-}
+En la función auxiliar `func EnqueueWithRetry(q lfq.Queue[Item], item Item, maxAttempts int) bool`, definida por el llamador, el primer intento cuenta para el límite. Si el límite es cero, la función devuelve `false` de inmediato.
 
+```go
+var backoff iox.Backoff
+for attempt := range maxAttempts {
+	if attempt > 0 {
+		backoff.Wait()
+	}
+	if q.Enqueue(&item) == nil {
+		return true
+	}
+}
+return false
 ```
 
 ### Apagado Elegante
 
-Las colas FAA con múltiples consumidores (MPMC, SPMC) incluyen un mecanismo de umbral para prevenir livelock. MPSC también implementa `Drainer`, pero solo como señal de apagado elegante (sin salto de umbral en `Dequeue`). Para un apagado elegante donde los productores terminan antes que los consumidores, usa la interfaz `Drainer`:
+Las colas MPMC genéricas y SPMC basadas en FAA usan un umbral de extracción. `Drain` desactiva ese umbral cuando termina la producción. `MPMCIndirect` y `MPMCPtr` permiten extraer todos los valores publicados en cualquier momento.
 
 ```go
 // Las goroutines productoras terminan
@@ -319,7 +334,6 @@ if d, ok := q.(lfq.Drainer); ok {
 }
 
 // Los consumidores ahora pueden drenar todos los elementos restantes.
-// Para MPMC/SPMC, Drain evita la salida temprana por umbral.
 for {
     item, err := q.Dequeue()
     if err != nil {
@@ -329,7 +343,7 @@ for {
 }
 ```
 
-`Drain()` es una pista — el llamador debe asegurar que no se harán más llamadas a `Enqueue()`. Para MPMC/SPMC, `Drain()` evita la salida temprana por umbral en `Dequeue`. Para MPSC, `Drain()` es solo una señal de apagado. Las colas SPSC no implementan `Drainer`; la aserción de tipo maneja este caso naturalmente.
+`Drain()` es una pista — el llamador debe asegurar que no se harán más llamadas a `Enqueue()`. En las colas con un umbral de extracción, `Drain()` evita la salida temprana por umbral en `Dequeue`. Para MPSC, `Drain()` es solo una señal de apagado. Las colas SPSC no implementan `Drainer`; la aserción de tipo maneja este caso naturalmente.
 
 ## Cuándo Usar Cada Cola
 
@@ -390,13 +404,7 @@ type MPMC[T any] struct {
 
 ## Detección de Condiciones de Carrera
 
-El detector de carreras de Go no está diseñado para verificar algoritmos lock-free. Rastrea primitivas de sincronización explícitas (mutex, canales) pero no puede observar las relaciones happens-before establecidas por el ordenamiento de memoria atómico.
-
-Las pruebas usan dos mecanismos de protección:
-- Etiqueta de compilación `//go:build !race` excluye archivos de ejemplo de las pruebas de carrera
-- Verificación en tiempo de ejecución `if lfq.RaceEnabled { t.Skip() }` omite pruebas concurrentes en `lockfree_test.go`
-
-Ejecute `go test -race ./...` para pruebas seguras ante carreras, o `go test ./...` para todas las pruebas.
+El detector de carreras de Go no puede observar toda la sincronización implementada en ensamblador en `atomix`. Ejecuta `go test -race ./...` para las pruebas instrumentadas. Ejecuta `go test ./...` para incluir las pruebas concurrentes y los ejemplos que se omiten al activar el detector.
 
 ## Dependencias
 
@@ -408,12 +416,10 @@ Ejecute `go test -race ./...` para pruebas seguras ante carreras, o `go test ./.
 
 | Plataforma | Estado |
 |------------|--------|
-| linux/amd64 | Principal |
-| linux/arm64 | Soportado |
-| linux/riscv64 | Soportado |
-| linux/loong64 | Soportado |
-| darwin/amd64, darwin/arm64 | Soportado |
-| freebsd/amd64, freebsd/arm64 | Soportado |
+| linux/amd64, linux/arm64 (LSE2) | Producción en Linux 6.18+ |
+| linux/riscv64, linux/loong64 | Compilación cruzada en CI |
+| darwin/amd64, darwin/arm64 | Desarrollo. La CI ejecuta pruebas en darwin/arm64. |
+| freebsd/amd64, freebsd/arm64 | Desarrollo |
 
 ## Referencias
 

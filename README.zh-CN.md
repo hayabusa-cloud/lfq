@@ -1,11 +1,11 @@
 # lfq
 
 [![Go Reference](https://pkg.go.dev/badge/code.hybscloud.com/lfq.svg)](https://pkg.go.dev/code.hybscloud.com/lfq)
-[![Go Report Card](https://goreportcard.com/badge/github.com/hayabusa-cloud/lfq)](https://goreportcard.com/report/github.com/hayabusa-cloud/lfq)
+[![Benchmarks](https://github.com/hayabusa-cloud/lfq/actions/workflows/benchmarks.yml/badge.svg)](https://github.com/hayabusa-cloud/lfq/actions/workflows/benchmarks.yml)
 [![Codecov](https://codecov.io/gh/hayabusa-cloud/lfq/graph/badge.svg)](https://codecov.io/gh/hayabusa-cloud/lfq)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**语言:** [English](README.md) | 简体中文 | [日本語](README.ja.md) | [Español](README.es.md) | [Français](README.fr.md)
+**语言:** [English](README.md) | 简体中文 | [Español](README.es.md) | [日本語](README.ja.md) | [Français](README.fr.md)
 
 Go 语言的无锁和无等待 FIFO 队列实现。
 
@@ -18,11 +18,11 @@ Go 语言的无锁和无等待 FIFO 队列实现。
 `lfq` 建立在经典的并发计算研究之上，提供严格有界的、无锁（Lock-free）和无等待（Wait-free）队列：
 
 - **Lamport 环形缓冲区 (1977)**：驱动我们的单生产者/单消费者 (SPSC) 路径，提供严格的 $O(1)$ 无等待延迟，无需昂贵的原子读-修改-写指令。
-- **Scalable Circular Queue (SCQ, 2019)**：我们的多方 (MPSC, SPMC, MPMC) 路径基于 Ruslan Nikolaev 的 SCQ 算法实现。通过使用硬件 Fetch-And-Add (FAA) 指令代替 CAS 循环，`lfq` 从本质上避免了竞争瓶颈和 ABA 问题，作为独立队列运行，无需外部安全内存回收机制（如 hazard pointers）。
+- **Scalable Circular Queue（SCQ，2019）**。泛型 FAA 队列基于 Ruslan Nikolaev 的 SCQ 算法。
 
 ### `iox` 非阻塞 I/O 栈
 
-`lfq` 专为基于 `iox` 的非阻塞 I/O 栈而构建。它避免了隐式运行时阻塞，转而采用显式背压 (Backpressure)。当队列满或空时，它会立即返回 `ErrWouldBlock`。这种简洁的错误模型与事件循环及调用方的退避原语（如 `iox.Backoff`）完美集成，允许可预测的流量管理和亚微秒级的延迟边界。
+队列操作返回 `ErrWouldBlock` 时，事件循环可以先处理其他工作，稍后重试。同步调用方可以使用 `iox.Backoff` 等待。
 
 ```go
 // 直接构造函数（推荐用于大多数场景）
@@ -45,7 +45,7 @@ go get code.hybscloud.com/lfq
 
 ### 编译器要求
 
-为获得更好的性能，请使用[内部函数优化 Go 编译器](https://github.com/hayabusa-cloud/go)编译：
+生产构建和基准测试使用 Atomix Go 编译器。[Atomix Go](https://github.com/hayabusa-cloud/go)
 
 ```bash
 # 使用 Makefile（推荐）
@@ -57,17 +57,25 @@ make test               # 使用内部函数编译器测试
 make install-compiler-source
 ```
 
-两个安装目标默认使用最新发布的版本。要选择特定版本，请设置环境变量 `COMPILER_TAG`。
+两个安装目标默认使用 Go 1.27.x 系列最新发布的 Atomix 编译器。要选择特定版本，请设置环境变量 `COMPILER_TAG`。查询版本使用 `jq`，可通过 `GH_TOKEN` 向 GitHub 验证身份。从源码构建时，请在 `PATH` 中使用官方 Go 1.27.x 的最新版本。
 
-手动安装时，请下载对应平台的归档文件，用同一版本的 `SHA256SUMS` 校验，然后将解压出的 `go` 目录放在 `$HOME/sdk/${COMPILER_TAG:-go-atomix}`。[编译器发布页](https://github.com/hayabusa-cloud/go/releases)
+手动安装时，请下载对应平台的归档文件，用同一版本的 `SHA256SUMS` 校验，然后将解压出的 `go` 目录放在 `$HOME/sdk/${COMPILER_TAG:-go1.27-atomix}`。[编译器发布页](https://github.com/hayabusa-cloud/go/releases)
 
 ```bash
 # 构建使用 lfq 的应用程序
-compiler="$HOME/sdk/${COMPILER_TAG:-go-atomix}"
+compiler="$HOME/sdk/${COMPILER_TAG:-go1.27-atomix}"
 GOTOOLCHAIN=local GOROOT="$compiler" "$compiler/bin/go" build ./...
 ```
 
-内部函数编译器将 `atomix` 操作内联为正确内存顺序的指令。标准 Go 编译器可用于基本测试，但在高争用情况下可能出现问题。
+Atomix 编译器会内联 `atomix` 操作。CI 使用标准 Go 编译器运行正确性测试。
+
+## 基准测试
+
+CI 在原生 Linux amd64 和 arm64 环境中运行 `make bench-session`。使用 Atomix 编译器运行同一目标，即可在 `GOMAXPROCS=2` 下采集十组样本。
+
+`Handoff` 在两个 goroutine 之间传递一个值，分别使用 `sess` 的四槽 SPSC 数据队列和相同容量的 Go 缓冲通道。两者在队列满或空时都使用 `iox.Backoff`。`ns/op` 包含等待时间，`waits/op` 表示每传递一个值时两端等待次数之和。
+
+`FullRetry` 在单个 goroutine 中测量向已满队列入队失败、出队一个值并成功重试入队的过程。运行 `make bench` 可执行全部基准测试。
 
 ## 队列类型
 
@@ -101,7 +109,7 @@ elem, err := q.Dequeue()  // 无等待 O(1)
 
 ### MPSC/SPMC/MPMC: 基于 FAA（默认）
 
-默认情况下，多访问队列基于 SCQ（可扩展环形队列）算法实现，使用 FAA（Fetch-And-Add）指令。FAA 盲目递增位置计数器，对于容量 n 需要 2n 个物理槽位，但在高争用情况下比基于 CAS 的替代方案扩展性更好。
+默认的多方队列使用 fetch-and-add（FAA）在包含 `2n` 个槽位的环中预留位置。`MPMCIndirect` 和 `MPMCPtr` 按连续的槽位位置依次发布和取出值。如果预留下一个位置的调用方暂停，其他调用方可以使用该位置。
 
 - **权衡**：名义容量为 `n` 时需要 `2n` 个物理槽位。
 - **瞬时容量**：当有 `P` 个并发生产者时，在背压生效前，可能会短暂入队最多 `P-1` 个超过 `Cap()` 的额外元素。
@@ -123,10 +131,10 @@ q := lfq.NewMPMC[*Request](4096)  // 基于 FAA 的 SCQ 算法
 
 Indirect 和 Ptr 队列变体（除 Compact Indirect 外的所有非 SPSC 变体）将序列号和载荷打包到单个 128 位原子操作中。这减少了缓存行争用，提高了高并发下的吞吐量。
 
-对于将指针编码到 128 位槽位中的 Ptr 变体（FAA 和 PtrSeq 变体），调用方必须在对象被出队（或已确认被消费）前保留其强类型 Go 引用。不要仅依赖队列中存储的指针位模式作为 GC 可达性根。
+对于将指针编码到 128 位槽位中的 Ptr 变体（FAA 和 PtrSeq），调用方须保留每个 Go 对象的有类型引用并保持其地址稳定，直到消费者取得所有权。
 
 ```go
-// Indirect - 每次操作单个 128 位原子
+// Indirect 将序列号和值存储在同一个原子对中。
 q := lfq.NewMPMCIndirect(4096)
 
 // Ptr - unsafe.Pointer 同样优化
@@ -218,46 +226,45 @@ if lfq.IsWouldBlock(err) {
 
 ### 缓冲池
 
-零分配 I/O 的常见模式是预先分配一个缓冲池，并使用无等待的 SPSC 队列跟踪其可用索引。这完全消除了垃圾回收 (GC) 的压力。
+由一个 goroutine 借用缓冲区，一个 goroutine 归还。每次 `alloc` 成功都会在空闲队列中腾出一个位置。最后一次使用缓冲区后，调用一次 `free` 归还对应的索引。
 
 ```go
 const poolSize = 1024
 const bufSize = 4096
 
-// 预分配缓冲区
 pool := make([][]byte, poolSize)
+freeList := lfq.NewSPSCIndirect(len(pool))
 for i := range pool {
-    pool[i] = make([]byte, bufSize)
+	pool[i] = make([]byte, bufSize)
+	freeList.Enqueue(uintptr(i))
 }
 
-// 空闲列表追踪可用索引
-freeList := lfq.NewSPSCIndirect(poolSize)
-for i := range poolSize {
-    freeList.Enqueue(uintptr(i))
+alloc := func() ([]byte, uintptr, bool) {
+	idx, err := freeList.Dequeue()
+	if err != nil {
+		return nil, 0, false
+	}
+	return pool[idx], idx, true
+}
+free := func(idx uintptr) {
+	freeList.Enqueue(idx)
 }
 
-// 分配
-func Alloc() ([]byte, uintptr, bool) {
-    idx, err := freeList.Dequeue()
-    if err != nil {
-        return nil, 0, false
-    }
-    return pool[idx], idx, true
-}
-
-// 释放
-func Free(idx uintptr) {
-    freeList.Enqueue(idx)
+if buf, idx, ok := alloc(); ok {
+	copy(buf, "hello")
+	free(idx)
 }
 ```
 
 ### 事件聚合
 
+聚合器在服务运行期间持续工作。每个生产者保留当前读数，直到成功入队。
+
 ```go
 type Event struct {
-    Source    string
-    Timestamp time.Time
-    Data      any
+	Source    string
+	Timestamp time.Time
+	Data      any
 }
 
 // 多源 → 单处理器
@@ -265,49 +272,57 @@ events := lfq.NewMPSC[Event](8192)
 
 // 事件源（多生产者）
 for sensor := range slices.Values(sensors) {
-    go func(s Sensor) {
-        for reading := range s.Readings() {
-            ev := Event{
-                Source:    s.Name(),
-                Timestamp: time.Now(),
-                Data:      reading,
-            }
-            events.Enqueue(&ev)
-        }
-    }(sensor)
+	go func(s Sensor) {
+		var backoff iox.Backoff
+		for reading := range s.Readings() {
+			ev := Event{
+				Source:    s.Name(),
+				Timestamp: time.Now(),
+				Data:      reading,
+			}
+			for events.Enqueue(&ev) != nil {
+				backoff.Wait()
+			}
+			backoff.Reset()
+		}
+	}(sensor)
 }
 
 // 单聚合器（单消费者）
 go func() {
-    for {
-        ev, err := events.Dequeue()
-        if err == nil {
-            aggregate(ev)
-        }
-    }
+	var backoff iox.Backoff
+	for {
+		ev, err := events.Dequeue()
+		if err != nil {
+			backoff.Wait()
+			continue
+		}
+		backoff.Reset()
+		aggregate(ev)
+	}
 }()
 ```
 
 ### 背压处理
 
-```go
-// 带重试和让步的入队
-func EnqueueWithRetry(q lfq.Queue[Item], item Item, maxRetries int) bool {
-	ba := iox.Backoff{}
-    for i := range maxRetries {
-        if q.Enqueue(&item) == nil {
-            return true
-        }
-        ba.Wait() // 让步以允许消费者消耗
-    }
-    return false // 对调用者施加背压
-}
+调用方可定义 `func EnqueueWithRetry(q lfq.Queue[Item], item Item, maxAttempts int) bool`。首次入队也计入 `maxAttempts`，上限为零时立即返回 `false`。
 
+```go
+var backoff iox.Backoff
+for attempt := range maxAttempts {
+	if attempt > 0 {
+		backoff.Wait()
+	}
+	if q.Enqueue(&item) == nil {
+		return true
+	}
+}
+return false
 ```
 
 ### 优雅关闭
 
-基于 FAA 的多消费者队列（MPMC、SPMC）包含防止活锁的阈值机制。MPSC 也实现 `Drainer`，但仅作为优雅关闭信号（出队不跳过阈值检查）。在生产者先于消费者结束的优雅关闭场景中，使用 `Drainer` 接口：
+基于 FAA 的泛型 MPMC 队列和 SPMC 队列使用出队阈值。生产结束后，`Drain` 会禁用该阈值。`MPMCIndirect` 和 `MPMCPtr` 中已发布的值始终可以取出。
 
 ```go
 // 生产者协程结束
@@ -319,7 +334,6 @@ if d, ok := q.(lfq.Drainer); ok {
 }
 
 // 消费者现在可以消耗所有剩余项目。
-// 对于 MPMC/SPMC，Drain 可避免阈值导致的提前返回。
 for {
     item, err := q.Dequeue()
     if err != nil {
@@ -329,7 +343,7 @@ for {
 }
 ```
 
-`Drain()` 是一个提示 — 调用者必须确保之后不再调用 `Enqueue()`。对于 MPMC/SPMC，`Drain()` 可避免 `Dequeue` 的阈值提前返回；对于 MPSC，`Drain()` 仅是关闭信号。SPSC 队列不实现 `Drainer`；类型断言会自然处理这种情况。
+`Drain()` 是一个提示 — 调用者必须确保之后不再调用 `Enqueue()`。对于使用出队阈值的队列，`Drain()` 可避免 `Dequeue` 的阈值提前返回；对于 MPSC，`Drain()` 仅是关闭信号。SPSC 队列不实现 `Drainer`；类型断言会自然处理这种情况。
 
 ## 如何选择队列
 
@@ -390,13 +404,7 @@ type MPMC[T any] struct {
 
 ## 竞态检测
 
-Go 的竞态检测器不适用于无锁算法验证。它跟踪显式同步原语（mutex、channel），但无法观察原子内存顺序建立的 happens-before 关系。
-
-测试使用两种保护机制：
-- 构建标签 `//go:build !race` 将示例文件排除在竞态测试之外
-- 运行时检查 `if lfq.RaceEnabled { t.Skip() }` 跳过 `lockfree_test.go` 中的并发测试
-
-运行 `go test -race ./...` 执行竞态安全测试，或运行 `go test ./...` 执行所有测试。
+Go 的竞态检测器无法观察 `atomix` 汇编实现中的所有同步操作。运行 `go test -race ./...` 可执行带竞态检测的测试。运行 `go test ./...` 还会执行竞态检测模式下跳过的并发测试和示例。
 
 ## 依赖
 
@@ -408,12 +416,10 @@ Go 的竞态检测器不适用于无锁算法验证。它跟踪显式同步原�
 
 | 平台 | 状态 |
 |------|------|
-| linux/amd64 | 主要 |
-| linux/arm64 | 支持 |
-| linux/riscv64 | 支持 |
-| linux/loong64 | 支持 |
-| darwin/amd64, darwin/arm64 | 支持 |
-| freebsd/amd64, freebsd/arm64 | 支持 |
+| linux/amd64, linux/arm64 (LSE2) | Linux 6.18 及以上版本的生产环境 |
+| linux/riscv64, linux/loong64 | CI 交叉编译 |
+| darwin/amd64, darwin/arm64 | 开发环境。CI 在 darwin/arm64 上运行测试。 |
+| freebsd/amd64, freebsd/arm64 | 开发环境 |
 
 ## 参考文献
 

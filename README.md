@@ -1,11 +1,11 @@
 # lfq
 
 [![Go Reference](https://pkg.go.dev/badge/code.hybscloud.com/lfq.svg)](https://pkg.go.dev/code.hybscloud.com/lfq)
-[![Go Report Card](https://goreportcard.com/badge/github.com/hayabusa-cloud/lfq)](https://goreportcard.com/report/github.com/hayabusa-cloud/lfq)
+[![Benchmarks](https://github.com/hayabusa-cloud/lfq/actions/workflows/benchmarks.yml/badge.svg)](https://github.com/hayabusa-cloud/lfq/actions/workflows/benchmarks.yml)
 [![Codecov](https://codecov.io/gh/hayabusa-cloud/lfq/graph/badge.svg)](https://codecov.io/gh/hayabusa-cloud/lfq)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**Languages:** English | [简体中文](README.zh-CN.md) | [日本語](README.ja.md) | [Español](README.es.md) | [Français](README.fr.md)
+**Languages:** English | [简体中文](README.zh-CN.md) | [Español](README.es.md) | [日本語](README.ja.md) | [Français](README.fr.md)
 
 Lock-free and wait-free FIFO queue implementations for Go.
 
@@ -18,11 +18,11 @@ Package `lfq` provides lock-free and wait-free bounded FIFO queues optimized for
 `lfq` builds on foundational concurrency research to overcome the limitations of traditional mutexes and CAS (Compare-And-Swap) loops:
 
 - **Lamport Ring Buffer (1977)**: Powers our Single-Producer/Single-Consumer (SPSC) paths, offering strictly $O(1)$ wait-free latency without expensive atomic read-modify-write instructions.
-- **Scalable Circular Queue (SCQ, 2019)**: Our multi-party (MPSC, SPMC, MPMC) paths are implemented based on Ruslan Nikolaev's SCQ algorithm. By utilizing hardware Fetch-And-Add (FAA) instructions instead of CAS loops, `lfq` inherently avoids contention bottlenecks and ABA problems, operating as a standalone queue without external safe memory reclamation (e.g., hazard pointers).
+- **Scalable Circular Queue (SCQ, 2019)**. Ruslan Nikolaev’s SCQ is the basis for the generic FAA queues.
 
 ### The `iox` Non-Blocking I/O Stacks
 
-`lfq` is built for `iox`-based non-blocking I/O stacks. It eschews implicit runtime blocking in favor of explicit backpressure. If a queue is full or empty, it immediately returns `ErrWouldBlock`. This concise error model integrates perfectly with event loops and caller-side backoff primitives (like `iox.Backoff`), allowing predictable traffic management and sub-microsecond latency boundaries.
+When a queue operation returns `ErrWouldBlock`, an event loop can service other work and retry later. A synchronous caller can wait with `iox.Backoff`.
 
 ```go
 // Direct constructor (recommended for most cases)
@@ -45,7 +45,7 @@ go get code.hybscloud.com/lfq
 
 ### Compiler Requirement
 
-For better performance, compile with the [intrinsics-optimized Go compiler](https://github.com/hayabusa-cloud/go):
+Use the Atomix Go compiler for production builds and benchmarks. [Atomix Go](https://github.com/hayabusa-cloud/go)
 
 ```bash
 # Using Makefile (recommended)
@@ -57,17 +57,25 @@ make test               # Test with intrinsics compiler
 make install-compiler-source
 ```
 
-Both install targets use the latest release by default. Export `COMPILER_TAG` to select a specific release.
+Both install targets default to the latest published Go 1.27.x Atomix compiler. Export `COMPILER_TAG` to select a specific release. Release discovery uses `jq` and can authenticate to GitHub with `GH_TOKEN`. Source builds use the latest stock Go 1.27.x on `PATH`.
 
-For manual installation, download the archive for your platform and verify it against `SHA256SUMS` from the same release. Place the extracted `go` directory at `$HOME/sdk/${COMPILER_TAG:-go-atomix}`. [Compiler releases](https://github.com/hayabusa-cloud/go/releases)
+For manual installation, download the archive for your platform and verify it against `SHA256SUMS` from the same release. Place the extracted `go` directory at `$HOME/sdk/${COMPILER_TAG:-go1.27-atomix}`. [Compiler releases](https://github.com/hayabusa-cloud/go/releases)
 
 ```bash
 # Build an application that uses lfq
-compiler="$HOME/sdk/${COMPILER_TAG:-go-atomix}"
+compiler="$HOME/sdk/${COMPILER_TAG:-go1.27-atomix}"
 GOTOOLCHAIN=local GOROOT="$compiler" "$compiler/bin/go" build ./...
 ```
 
-The intrinsics compiler inlines `atomix` operations with proper memory ordering. The standard Go compiler works for basic testing but may exhibit issues under high contention.
+The Atomix compiler inlines `atomix` operations. CI runs correctness tests with standard Go.
+
+## Benchmarks
+
+CI runs `make bench-session` on native Linux amd64 and arm64. Run the same target with the Atomix compiler to collect ten samples with `GOMAXPROCS=2`.
+
+`Handoff` transfers one value between two goroutines through the four-slot SPSC data queue used by `sess` or a buffered Go channel of the same capacity. Both use `iox.Backoff` on a full or empty queue. `ns/op` includes that wait time, and `waits/op` counts waits on both sides per delivered value.
+
+`FullRetry` measures a failed enqueue on a full queue, one dequeue, and a successful retry in a single goroutine. Run `make bench` for the full benchmark suite.
 
 ## Queue Types
 
@@ -101,7 +109,7 @@ elem, err := q.Dequeue()  // Wait-free O(1)
 
 ### MPSC/SPMC/MPMC: FAA-Based (Default)
 
-By default, multi-access queues implement the SCQ (Scalable Circular Queue) algorithm using FAA (Fetch-And-Add) instructions. FAA blindly increments position counters, requiring 2n physical slots for capacity n, but scales better under high contention than CAS-based alternatives.
+Default multi-access queues use fetch-and-add (FAA) to claim positions in a ring of `2n` slots. In `MPMCIndirect` and `MPMCPtr`, workers publish and remove values at consecutive slot positions. Another worker can use the next position if a claimant pauses.
 
 - **Trade-off**: Requires `2n` physical slots for nominal capacity `n`.
 - **Transient Capacity**: With `P` concurrent producers, up to `P-1` additional items may be transiently enqueued beyond `Cap()` before backpressure applies.
@@ -123,10 +131,10 @@ Cycle-based slot validation provides ABA safety without epoch counters or hazard
 
 Indirect and Ptr queue variants (all non-SPSC variants except Compact Indirect) pack sequence number and payload into a single 128-bit atomic. This reduces cache line contention and improves throughput under high concurrency.
 
-For Ptr variants that encode pointers into 128-bit slots (FAA and PtrSeq variants), keep a typed Go reference to enqueued objects until they are dequeued (or otherwise guaranteed consumed). Do not rely on queued pointer bits alone as a GC reachability root.
+For Ptr variants that encode pointers in 128-bit slots (FAA and PtrSeq), keep a typed reference to each Go object at a stable address until its consumer takes ownership.
 
 ```go
-// Indirect - single 128-bit atomic per operation
+// Indirect stores the sequence and value in one atomic pair.
 q := lfq.NewMPMCIndirect(4096)
 
 // Ptr - same optimization for unsafe.Pointer
@@ -218,46 +226,45 @@ The following patterns demonstrate how `lfq` can be integrated into concurrent s
 
 ### Buffer Pool
 
-A common pattern for zero-allocation I/O is pre-allocating a pool of buffers and tracking their available indices using a wait-free SPSC queue. This eliminates GC pressure entirely.
+One goroutine borrows buffers from the pool and one returns them. Each successful `alloc` leaves room in the free list for a return. Call `free` exactly once, after the buffer’s last use.
 
 ```go
 const poolSize = 1024
 const bufSize = 4096
 
-// Pre-allocate buffers
 pool := make([][]byte, poolSize)
+freeList := lfq.NewSPSCIndirect(len(pool))
 for i := range pool {
-    pool[i] = make([]byte, bufSize)
+	pool[i] = make([]byte, bufSize)
+	freeList.Enqueue(uintptr(i))
 }
 
-// Free list tracks available indices
-freeList := lfq.NewSPSCIndirect(poolSize)
-for i := range poolSize {
-    freeList.Enqueue(uintptr(i))
+alloc := func() ([]byte, uintptr, bool) {
+	idx, err := freeList.Dequeue()
+	if err != nil {
+		return nil, 0, false
+	}
+	return pool[idx], idx, true
+}
+free := func(idx uintptr) {
+	freeList.Enqueue(idx)
 }
 
-// Allocate
-func Alloc() ([]byte, uintptr, bool) {
-    idx, err := freeList.Dequeue()
-    if err != nil {
-        return nil, 0, false
-    }
-    return pool[idx], idx, true
-}
-
-// Free
-func Free(idx uintptr) {
-    freeList.Enqueue(idx)
+if buf, idx, ok := alloc(); ok {
+	copy(buf, "hello")
+	free(idx)
 }
 ```
 
 ### Event Aggregation
 
+The aggregator runs for the lifetime of the service. Each producer keeps its current reading until the queue accepts it.
+
 ```go
 type Event struct {
-    Source    string
-    Timestamp time.Time
-    Data      any
+	Source    string
+	Timestamp time.Time
+	Data      any
 }
 
 // Multiple sources → Single processor
@@ -265,49 +272,57 @@ events := lfq.NewMPSC[Event](8192)
 
 // Event sources (multiple producers)
 for sensor := range slices.Values(sensors) {
-    go func(s Sensor) {
-        for reading := range s.Readings() {
-            ev := Event{
-                Source:    s.Name(),
-                Timestamp: time.Now(),
-                Data:      reading,
-            }
-            events.Enqueue(&ev)
-        }
-    }(sensor)
+	go func(s Sensor) {
+		var backoff iox.Backoff
+		for reading := range s.Readings() {
+			ev := Event{
+				Source:    s.Name(),
+				Timestamp: time.Now(),
+				Data:      reading,
+			}
+			for events.Enqueue(&ev) != nil {
+				backoff.Wait()
+			}
+			backoff.Reset()
+		}
+	}(sensor)
 }
 
 // Single aggregator (single consumer)
 go func() {
-    for {
-        ev, err := events.Dequeue()
-        if err == nil {
-            aggregate(ev)
-        }
-    }
+	var backoff iox.Backoff
+	for {
+		ev, err := events.Dequeue()
+		if err != nil {
+			backoff.Wait()
+			continue
+		}
+		backoff.Reset()
+		aggregate(ev)
+	}
 }()
 ```
 
 ### Backpressure Handling
 
-```go
-// With retry and yield
-func EnqueueWithRetry(q lfq.Queue[Item], item Item, maxRetries int) bool {
-	ba := iox.Backoff{}
-    for i := range maxRetries {
-        if q.Enqueue(&item) == nil {
-            return true
-        }
-        ba.Wait() // Yield to let consumers drain
-    }
-    return false // Apply backpressure to caller
-}
+The caller-defined helper `func EnqueueWithRetry(q lfq.Queue[Item], item Item, maxAttempts int) bool` counts the first attempt toward its limit. A zero limit returns `false` immediately.
 
+```go
+var backoff iox.Backoff
+for attempt := range maxAttempts {
+	if attempt > 0 {
+		backoff.Wait()
+	}
+	if q.Enqueue(&item) == nil {
+		return true
+	}
+}
+return false
 ```
 
 ### Graceful Shutdown
 
-FAA-based multi-consumer queues (MPMC, SPMC) include a threshold mechanism to prevent livelock. MPSC also implements `Drainer`, but as a graceful-shutdown signal only (no dequeue threshold skip). For graceful shutdown where producers finish before consumers, use the `Drainer` interface:
+The generic FAA MPMC and FAA SPMC queues use a dequeue threshold. `Drain` disables that threshold after production ends. `MPMCIndirect` and `MPMCPtr` can always drain their published values.
 
 ```go
 // Producer goroutines finish
@@ -319,7 +334,6 @@ if d, ok := q.(lfq.Drainer); ok {
 }
 
 // Consumers can now drain all remaining items.
-// For MPMC/SPMC, Drain avoids threshold-based early exit.
 for {
     item, err := q.Dequeue()
     if err != nil {
@@ -329,7 +343,7 @@ for {
 }
 ```
 
-`Drain()` is a hint — the caller must ensure no further `Enqueue()` calls will be made. For MPMC/SPMC, `Drain()` avoids threshold-based early exit in `Dequeue`. For MPSC, `Drain()` is a shutdown signal only. SPSC queues do not implement `Drainer`; the type assertion naturally handles this case.
+`Drain()` is a hint — the caller must ensure no further `Enqueue()` calls will be made. For queues with a dequeue threshold, `Drain()` avoids threshold-based early exit in `Dequeue`. For MPSC, `Drain()` is a shutdown signal only. SPSC queues do not implement `Drainer`; the type assertion naturally handles this case.
 
 ## When to Use Which Queue
 
@@ -390,13 +404,7 @@ type MPMC[T any] struct {
 
 ## Race Detection
 
-Go's race detector is not designed for lock-free algorithm verification. It tracks explicit sync primitives (mutex, channels) but cannot observe happens-before relationships from atomic memory orderings.
-
-Tests use two protection mechanisms:
-- Build tag `//go:build !race` excludes example files from race testing
-- Runtime check `if lfq.RaceEnabled { t.Skip() }` skips concurrent tests in `lockfree_test.go`
-
-Run `go test -race ./...` for race-safe tests, or `go test ./...` for all tests.
+Go’s race detector cannot observe all synchronization in `atomix` assembly. Run `go test -race ./...` for the instrumented tests. Run `go test ./...` to include the concurrent tests and examples skipped in race builds.
 
 ## Dependencies
 
@@ -408,12 +416,10 @@ Run `go test -race ./...` for race-safe tests, or `go test ./...` for all tests.
 
 | Platform | Status |
 |----------|--------|
-| linux/amd64 | Primary |
-| linux/arm64 | Supported |
-| linux/riscv64 | Supported |
-| linux/loong64 | Supported |
-| darwin/amd64, darwin/arm64 | Supported |
-| freebsd/amd64, freebsd/arm64 | Supported |
+| linux/amd64, linux/arm64 (LSE2) | Production on Linux 6.18+ |
+| linux/riscv64, linux/loong64 | Cross-built in CI |
+| darwin/amd64, darwin/arm64 | Development. CI tests darwin/arm64. |
+| freebsd/amd64, freebsd/arm64 | Development |
 
 ## References
 
