@@ -13,3 +13,11 @@ func StalledMPMCSeqForTest() (*MPMCIndirectSeq, *MPMCPtrSeq) {
 	ptrs.buffer[0].entry.StoreRelaxed(capacity, 0)
 	return words, ptrs
 }
+
+// MPMCPtrWithAdmittedBurstForTest widens only the admission limit to model
+// producers that all passed the capacity check before any claimed a ticket.
+func MPMCPtrWithAdmittedBurstForTest(capacity int) (*MPMCPtr, func() uint64) {
+	q := NewMPMCPtr(capacity)
+	q.capacity = uint64(len(q.buffer) + 1)
+	return q, q.tail.LoadRelaxed
+}

@@ -71,11 +71,11 @@ The Atomix compiler inlines `atomix` operations. CI runs correctness tests with 
 
 ## Benchmarks
 
-CI runs `make bench-session` on native Linux amd64 and arm64. Run the same target with the Atomix compiler to collect ten samples with `GOMAXPROCS=2`.
+CI runs `make bench-ci` on native Linux amd64 and arm64 with the Atomix compiler and `GOMAXPROCS=2`. Each Actions summary shows the median of ten samples for session handoff and retry, an enqueue/dequeue pair on each of the four queue types, and SPMC with concurrent consumers. The workflow artifacts contain the raw samples.
 
 `Handoff` transfers one value between two goroutines through the four-slot SPSC data queue used by `sess` or a buffered Go channel of the same capacity. Both use `iox.Backoff` on a full or empty queue. `ns/op` includes that wait time, and `waits/op` counts waits on both sides per delivered value.
 
-`FullRetry` measures a failed enqueue on a full queue, one dequeue, and a successful retry in a single goroutine. Run `make bench` for the full benchmark suite.
+`FullRetry` measures a failed enqueue on a full queue, one dequeue, and a successful retry in a single goroutine. Run `make bench-session` for the session cases or `make bench` for the full suite.
 
 ## Queue Types
 
@@ -177,9 +177,9 @@ q := lfq.NewMPMC[MyStruct](1024)
 q := lfq.NewMPMCIndirect(1024)
 q.Enqueue(uintptr(poolIndex))
 
-// Pointer - zero-copy
-q := lfq.NewMPMCPtr(1024)
-q.Enqueue(unsafe.Pointer(obj))
+// Pointer into a package-level message array
+q := lfq.NewMPMCPtr(len(messages))
+q.Enqueue(unsafe.Pointer(&messages[i]))
 ```
 
 ### Compact Mode
@@ -196,7 +196,9 @@ q := lfq.New(4096).Compact().BuildIndirect()
 | Default | FAA-based | 2n | High contention, scalability |
 | Compact | CAS-based | n | Memory constrained |
 
-SPSC variants already use n slots (Lamport ring buffer) and ignore Compact(). For Indirect queues with Compact(), values are limited to 63 bits. For `SPMCCompactIndirect` and `MPMCCompactIndirect`, callers must also ensure values are distinct while they may be observed by concurrent consumers; use the default indirect queues when duplicate `uintptr` values are required under multi-consumer access.
+SPSC variants already use n slots (Lamport ring buffer) and ignore `Compact()`. For other topologies, `Compact().BuildIndirect()` accepts 63-bit values. `SPMCCompactIndirect` and `MPMCCompactIndirect` also require values to stay distinct while concurrent consumers can observe them.
+
+For duplicate `uintptr` values with multiple consumers, use `NewSPMCIndirectSeq` with one producer or `NewMPMCIndirect` with multiple producers.
 
 ## Operations
 
@@ -333,11 +335,11 @@ if d, ok := q.(lfq.Drainer); ok {
     d.Drain()
 }
 
-// Consumers can now drain all remaining items.
+// Dequeue until the queue reports empty.
 for {
     item, err := q.Dequeue()
     if err != nil {
-        break // Queue is empty
+        break
     }
     process(item)
 }

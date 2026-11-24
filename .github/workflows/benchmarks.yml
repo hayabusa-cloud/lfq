@@ -12,10 +12,15 @@ permissions:
 
 jobs:
   benchmarks:
+    name: linux/${{ matrix.arch }}
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-latest, ubuntu-26.04-arm]
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-26.04-arm
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 5
     steps:
@@ -28,7 +33,31 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: make install-compiler check-compiler COMPILER_DIR="$RUNNER_TEMP/go-atomix"
 
-      - name: Run session queue benchmarks
+      - name: Run queue benchmarks
+        id: bench
+        shell: bash
         run: |
-          uname -srm
-          make bench-session COMPILER_DIR="$RUNNER_TEMP/go-atomix"
+          results="$RUNNER_TEMP/lfq-benchmarks"
+          mkdir -p "$results"
+          {
+            uname -srm
+            "$RUNNER_TEMP/go-atomix/bin/go" version
+            timeout -k 5s 2m make bench-ci COMPILER_DIR="$RUNNER_TEMP/go-atomix"
+          } 2>&1 | tee "$results/benchmarks.txt"
+
+      - name: Publish benchmark summary
+        if: ${{ !cancelled() && steps.bench.outcome != 'skipped' }}
+        shell: bash
+        run: |
+          results="$RUNNER_TEMP/lfq-benchmarks"
+          compiler="$RUNNER_TEMP/go-atomix"
+          GOTOOLCHAIN=local GOROOT="$compiler" "$compiler/bin/go" run .github/benchmark-summary.go \
+            < "$results/benchmarks.txt" | tee "$results/summary.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload benchmark results
+        if: ${{ !cancelled() && steps.bench.outcome != 'skipped' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: lfq-benchmarks-linux-${{ matrix.arch }}
+          path: ${{ runner.temp }}/lfq-benchmarks/
+          if-no-files-found: error

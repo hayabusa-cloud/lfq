@@ -24,6 +24,7 @@ jobs:
   test:
     name: test (${{ matrix.name }})
     runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 5
     strategy:
       fail-fast: false
       matrix:
@@ -73,10 +74,10 @@ jobs:
           fi
 
       - name: Run tests with race detector
-        run: go test -timeout 10m -race ./...
+        run: go test -timeout 120s -race ./...
 
       - name: Run tests with coverage
-        run: go test -timeout 10m -covermode=atomic -coverprofile=coverage.out ./...
+        run: go test -timeout 120s -covermode=atomic -coverprofile=coverage.out ./...
 
       - name: Upload coverage to Codecov
         if: matrix.name == 'linux/amd64 (stable)'
@@ -89,6 +90,7 @@ jobs:
   cross-build:
     name: cross-build (compile-only)
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     strategy:
       matrix:
         include:
@@ -123,6 +125,7 @@ jobs:
   # Benchmark with intrinsics compiler (manual trigger)
   benchmark-intrinsics:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: ${{ github.event.inputs.run_intrinsics_benchmark == 'true' }}
     steps:
       - uses: actions/checkout@v7
@@ -133,4 +136,4 @@ jobs:
         run: make install-compiler check-compiler COMPILER_DIR="$RUNNER_TEMP/go-atomix"
 
       - name: Run benchmarks with intrinsics
-        run: make bench COMPILER_DIR="$RUNNER_TEMP/go-atomix"
+        run: timeout -k 5s 8m make bench COMPILER_DIR="$RUNNER_TEMP/go-atomix" BENCH_FLAGS=-benchtime=200ms

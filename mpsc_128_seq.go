@@ -17,7 +17,7 @@ import (
 //
 // Entry format: [lo=sequence | hi=value]
 //
-// Memory: 16 bytes per slot (sequence + value in single Uint128)
+// Each slot holds a 16-byte entry padded to 64 bytes.
 type MPSCIndirectSeq struct {
 	_        pad
 	head     atomix.Uint64 // Consumer reads from here
@@ -109,7 +109,7 @@ func (q *MPSCIndirectSeq) Cap() int {
 //
 // Entry format: [lo=sequence | hi=pointer as uint64]
 //
-// Memory: 16 bytes per slot
+// Each slot holds a 16-byte entry padded to 64 bytes.
 type MPSCPtrSeq struct {
 	_        pad
 	head     atomix.Uint64 // Consumer reads from here

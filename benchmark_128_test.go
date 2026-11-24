@@ -377,11 +377,12 @@ func BenchmarkSPMCCompactIndirect_SingleOp(b *testing.B) {
 
 func BenchmarkSPMCIndirect_ParallelConsumers(b *testing.B) {
 	q := lfq.NewSPMCIndirect(4096)
-	var produced atomix.Int64
 
 	// Single producer in background
 	done := make(chan struct{})
+	stopped := make(chan struct{})
 	go func() {
+		defer close(stopped)
 		sw := spin.Wait{}
 		i := uintptr(0)
 		for {
@@ -390,7 +391,6 @@ func BenchmarkSPMCIndirect_ParallelConsumers(b *testing.B) {
 				return
 			default:
 				if q.Enqueue(i) == nil {
-					produced.Add(1)
 					i++
 					sw.Reset()
 				} else {
@@ -415,6 +415,7 @@ func BenchmarkSPMCIndirect_ParallelConsumers(b *testing.B) {
 	})
 	b.StopTimer()
 	close(done)
+	<-stopped
 }
 
 // =============================================================================

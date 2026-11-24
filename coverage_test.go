@@ -1507,7 +1507,6 @@ func TestCoverageDrainThreshold(t *testing.T) {
 		q := lfq.NewSPMCPtr(8)
 		const totalItems = 200
 		const numConsumers = 8
-		vals := make([]int, totalItems)
 
 		var consumed atomix.Int64
 		var drained atomix.Bool
@@ -1539,9 +1538,8 @@ func TestCoverageDrainThreshold(t *testing.T) {
 		}
 
 		backoff := iox.Backoff{}
-		for i := range totalItems {
-			vals[i] = i + 1
-			for q.Enqueue(unsafe.Pointer(&vals[i])) != nil {
+		for range totalItems {
+			for q.Enqueue(nil) != nil {
 				backoff.Wait()
 			}
 			backoff.Reset()
@@ -1628,10 +1626,8 @@ func TestCoverageDrainThreshold(t *testing.T) {
 
 	t.Run("PtrDrainEarly", func(t *testing.T) {
 		q := lfq.NewSPMCPtr(8)
-		vals := make([]int, 8)
 		for i := range 8 {
-			vals[i] = i + 1
-			if err := q.Enqueue(unsafe.Pointer(&vals[i])); err != nil {
+			if err := q.Enqueue(nil); err != nil {
 				t.Fatalf("Enqueue(%d): %v", i, err)
 			}
 		}

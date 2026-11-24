@@ -192,18 +192,8 @@
 //		freeList.Enqueue(idx)
 //	}
 //
-// When to use Ptr:
-//
-//	// Zero-copy object passing between goroutines
-//	q := lfq.NewMPMCPtr(1024)
-//
-//	// Producer creates object once
-//	msg := &Message{Data: largePayload}
-//	q.Enqueue(unsafe.Pointer(msg))
-//
-//	// Consumer receives same pointer - no copy
-//	ptr, _ := q.Dequeue()
-//	msg := (*Message)(ptr)
+// Use [QueuePtr] to pass objects between goroutines without copying them.
+// Its example shows how a producer hands off a pointer into a message pool.
 //
 // # Algorithm Selection
 //
@@ -226,7 +216,8 @@
 // FAA (Fetch-And-Add) scales better under high contention but requires
 // 2n physical slots. Use Compact() when memory efficiency is critical.
 //
-// Type-safe builder functions enforce constraints at compile time:
+// These builders panic at construction if the producer or consumer settings
+// conflict with the requested topology.
 //
 //	BuildSPSC[T](b) → *SPSC[T]    // Requires SP + SC
 //	BuildMPSC[T](b) → Queue[T]   // Requires SC only
@@ -247,8 +238,9 @@
 // SPSC variants already use n slots (Lamport ring buffer) and ignore Compact().
 // Compact indirect SPMC/MPMC queues store only the value and empty marker in
 // each slot, so callers must ensure values are distinct while they may be
-// observed by concurrent consumers. Use the default indirect queues when
-// duplicate uintptr values are required under multi-consumer access.
+// observed by concurrent consumers. For duplicate uintptr values with multiple
+// consumers, use [NewSPMCIndirectSeq] with one producer or [NewMPMCIndirect]
+// with multiple producers.
 //
 // # Error Handling
 //
@@ -289,7 +281,7 @@
 // FAA-based queues (MPSC, SPMC, MPMC) use a best-effort pre-check before
 // the atomic slot claim. Under high concurrency, up to P−1 additional
 // items (P = number of concurrent producers) may be transiently enqueued
-// beyond Cap(). The 2n physical slot buffer accommodates this safely.
+// beyond Cap().
 // Compact (CAS-based) variants enforce a strict capacity bound.
 //
 // Length is intentionally not provided because accurate counts in lock-free
@@ -324,8 +316,7 @@
 //	    d.Drain()
 //	}
 //
-//	// Consumers can now drain all remaining items
-//	// without threshold blocking
+//	// Consumers can now dequeue with the threshold disabled.
 //
 // Drain disables the dequeue threshold on queues that use one. The caller
 // must ensure no further Enqueue calls will be made.

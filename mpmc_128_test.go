@@ -22,16 +22,12 @@ import (
 // =============================================================================
 
 func TestMPMCIndirect128BasicOperations(t *testing.T) {
-	// Test empty dequeue on fresh queue
-	// Note: FAA-based queues advance indices on empty dequeue, so use separate queue
-	qEmpty := lfq.NewMPMCIndirect(4)
-	_, err := qEmpty.Dequeue()
+	q := lfq.NewMPMCIndirect(4)
+	_, err := q.Dequeue()
 	if !errors.Is(err, lfq.ErrWouldBlock) {
 		t.Fatalf("empty dequeue: got %v, want ErrWouldBlock", err)
 	}
 
-	// Test enqueue/dequeue on fresh queue
-	q := lfq.NewMPMCIndirect(4)
 	for i := range 4 {
 		if err := q.Enqueue(uintptr(i + 100)); err != nil {
 			t.Fatalf("enqueue %d: %v", i, err)
@@ -111,17 +107,13 @@ func TestMPMCIndirect128Panic(t *testing.T) {
 // =============================================================================
 
 func TestMPMCPtr128BasicOperations(t *testing.T) {
-	// Test empty dequeue on fresh queue
-	// Note: FAA-based queues advance indices on empty dequeue, so use separate queue
-	qEmpty := lfq.NewMPMCPtr(4)
-	_, err := qEmpty.Dequeue()
+	q := lfq.NewMPMCPtr(4)
+	_, err := q.Dequeue()
 	if !errors.Is(err, lfq.ErrWouldBlock) {
 		t.Fatalf("empty dequeue: got %v, want ErrWouldBlock", err)
 	}
 
-	// Test enqueue/dequeue on fresh queue
-	q := lfq.NewMPMCPtr(4)
-	vals := []int{100, 200, 300, 400}
+	vals := packedPtrTestValues[:]
 	for i := range vals {
 		if err := q.Enqueue(unsafe.Pointer(&vals[i])); err != nil {
 			t.Fatalf("enqueue %d: %v", i, err)
@@ -146,6 +138,23 @@ func TestMPMCPtr128BasicOperations(t *testing.T) {
 		if *(*int)(ptr) != vals[i] {
 			t.Fatalf("dequeue %d: got %d, want %d", i, *(*int)(ptr), vals[i])
 		}
+	}
+}
+
+func TestMPMCPtr128RollsBackFullRingClaim(t *testing.T) {
+	const capacity = 2
+	const slots = 2 * capacity
+	q, tail := lfq.MPMCPtrWithAdmittedBurstForTest(capacity)
+	for range slots {
+		if err := q.Enqueue(nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := q.Enqueue(nil); !errors.Is(err, lfq.ErrWouldBlock) {
+		t.Fatalf("enqueue on full ring = %v, want ErrWouldBlock", err)
+	}
+	if got := tail(); got != slots {
+		t.Fatalf("tail after rejected enqueue = %d, want %d", got, slots)
 	}
 }
 
