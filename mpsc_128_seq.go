@@ -76,6 +76,8 @@ func (q *MPSCIndirectSeq) Enqueue(elem uintptr) error {
 			}
 		} else if seqLo < tail {
 			return ErrWouldBlock
+		} else {
+			q.tail.CompareAndSwapRelaxed(tail, tail+1)
 		}
 		sw.Once()
 	}
@@ -166,6 +168,8 @@ func (q *MPSCPtrSeq) Enqueue(elem unsafe.Pointer) error {
 			}
 		} else if seqLo < tail {
 			return ErrWouldBlock
+		} else {
+			q.tail.CompareAndSwapRelaxed(tail, tail+1)
 		}
 		sw.Once()
 	}

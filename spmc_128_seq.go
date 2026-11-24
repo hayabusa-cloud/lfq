@@ -93,6 +93,8 @@ func (q *SPMCIndirectSeq) Dequeue() (uintptr, error) {
 			}
 		} else if seqLo < head+1 {
 			return 0, ErrWouldBlock
+		} else {
+			q.head.CompareAndSwapRelaxed(head, head+1)
 		}
 		sw.Once()
 	}
@@ -183,6 +185,8 @@ func (q *SPMCPtrSeq) Dequeue() (unsafe.Pointer, error) {
 			}
 		} else if seqLo < head+1 {
 			return nil, ErrWouldBlock
+		} else {
+			q.head.CompareAndSwapRelaxed(head, head+1)
 		}
 		sw.Once()
 	}
