@@ -17,6 +17,7 @@ package lfq_test
 
 import (
 	"runtime"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -1377,36 +1378,22 @@ func TestDrainIdempotent(t *testing.T) {
 	})
 }
 
-// TestDrainGracefulShutdown tests the graceful shutdown pattern where
-// producers finish first, then Drain() is called to allow consumers to
-// drain remaining items without threshold blocking.
+// TestDrainGracefulShutdown covers the fresh-batch handoff and the packed
+// MPMC queue's concurrent consumers.
 func TestDrainGracefulShutdown(t *testing.T) {
 	if lfq.RaceEnabled {
 		t.Skip("skip: lock-free algorithm uses cross-variable memory ordering")
 	}
 
-	t.Run("MPMC_MultiConsumer", func(t *testing.T) {
-		const (
-			numProducers = 4
-			numConsumers = 4
-			itemsPerProd = 100
-			totalItems   = numProducers * itemsPerProd
-			queueCap     = 32
-		)
-
-		q := lfq.NewMPMC[int](queueCap)
-		testGracefulShutdownMPMC(t, q, numProducers, numConsumers, itemsPerProd)
+	values := []int{1, 2, 3, 4}
+	t.Run("MPMC", func(t *testing.T) {
+		q := lfq.NewMPMC[int](len(values))
+		testDrainBatch(t, values, 2, q.Enqueue, q.Drain, q.Dequeue)
 	})
 
-	t.Run("SPMC_MultiConsumer", func(t *testing.T) {
-		const (
-			numConsumers = 4
-			totalItems   = 100
-			queueCap     = 32
-		)
-
-		q := lfq.NewSPMC[int](queueCap)
-		testGracefulShutdownSPMC(t, q, numConsumers, totalItems)
+	t.Run("SPMC", func(t *testing.T) {
+		q := lfq.NewSPMC[int](len(values))
+		testDrainBatch(t, values, 1, q.Enqueue, q.Drain, q.Dequeue)
 	})
 
 	t.Run("MPMCIndirect_MultiConsumer", func(t *testing.T) {
@@ -1421,15 +1408,19 @@ func TestDrainGracefulShutdown(t *testing.T) {
 		testGracefulShutdownMPMCIndirect(t, q, numProducers, numConsumers, itemsPerProd)
 	})
 
-	t.Run("SPMCIndirect_MultiConsumer", func(t *testing.T) {
-		const (
-			numConsumers = 4
-			totalItems   = 100
-			queueCap     = 32
-		)
+	t.Run("SPMCIndirect", func(t *testing.T) {
+		words := []uintptr{1, 2, 3, 4}
+		q := lfq.NewSPMCIndirect(len(words))
+		testDrainBatch(t, words, 1, func(v *uintptr) error { return q.Enqueue(*v) }, q.Drain, q.Dequeue)
+	})
 
-		q := lfq.NewSPMCIndirect(queueCap)
-		testGracefulShutdownSPMCIndirect(t, q, numConsumers, totalItems)
+	t.Run("SPMCPtr", func(t *testing.T) {
+		ptrs := make([]unsafe.Pointer, len(packedPtrTestValues))
+		for i := range ptrs {
+			ptrs[i] = unsafe.Pointer(&packedPtrTestValues[i])
+		}
+		q := lfq.NewSPMCPtr(len(ptrs))
+		testDrainBatch(t, ptrs, 1, func(v *unsafe.Pointer) error { return q.Enqueue(*v) }, q.Drain, q.Dequeue)
 	})
 }
 
@@ -1675,184 +1666,47 @@ func testDrainPtrMPSC(t *testing.T, q *lfq.MPSCPtr) {
 	}
 }
 
-func testGracefulShutdownMPMC(t *testing.T, q *lfq.MPMC[int], numProducers, numConsumers, itemsPerProd int) {
-	t.Helper()
-	totalItems := numProducers * itemsPerProd
-
-	// Pre-allocate values
-	values := make([]int, totalItems)
-	for i := range totalItems {
-		values[i] = i
-	}
-
-	seen := make([]atomix.Int32, totalItems)
-	var produced, consumed atomix.Int64
-	var prodWg, consWg sync.WaitGroup
-	drainSignal := make(chan struct{})
-
-	// Start producers
-	for p := range numProducers {
-		prodWg.Add(1)
-		go func(id int) {
-			defer prodWg.Done()
-			backoff := iox.Backoff{}
-			start := id * itemsPerProd
-			end := start + itemsPerProd
-			for idx := start; idx < end; idx++ {
-				for q.Enqueue(&values[idx]) != nil {
-					backoff.Wait()
-				}
-				produced.Add(1)
-				backoff.Reset()
-			}
-		}(p)
-	}
-
-	// Start consumers - they run until drain signal + queue empty
-	for range numConsumers {
-		consWg.Add(1)
-		go func() {
-			defer consWg.Done()
-			backoff := iox.Backoff{}
-			draining := false
-			emptyCount := 0
-			for {
-				select {
-				case <-drainSignal:
-					draining = true
-				default:
-				}
-				v, err := q.Dequeue()
-				if err == nil {
-					emptyCount = 0
-					backoff.Reset()
-					if v >= 0 && v < totalItems {
-						seen[v].Add(1)
-					}
-					consumed.Add(1)
-				} else if draining {
-					emptyCount++
-					if emptyCount > 1000 {
-						return // Queue drained
-					}
-				} else {
-					backoff.Wait()
-				}
-			}
-		}()
-	}
-
-	// Wait for producers, then drain
-	prodWg.Wait()
-	q.Drain()
-	close(drainSignal)
-	consWg.Wait()
-
-	// Verify
-	var missing, duplicates int
-	for i := range totalItems {
-		count := seen[i].Load()
-		if count == 0 {
-			missing++
-		} else if count > 1 {
-			duplicates++
-		}
-	}
-
-	if duplicates > 0 {
-		t.Errorf("duplicates: %d", duplicates)
-	}
-	if missing > 0 {
-		t.Logf("missing: %d (produced=%d consumed=%d)", missing, produced.Load(), consumed.Load())
-	}
-
-	t.Logf("graceful shutdown: produced=%d consumed=%d", produced.Load(), consumed.Load())
-}
-
-func testGracefulShutdownSPMC(t *testing.T, q *lfq.SPMC[int], numConsumers, totalItems int) {
+func testDrainBatch[T comparable](
+	t *testing.T, values []T, producers int,
+	enqueue func(*T) error, drain func(), dequeue func() (T, error),
+) {
 	t.Helper()
 
-	values := make([]int, totalItems)
-	for i := range totalItems {
-		values[i] = i
-	}
-
-	seen := make([]atomix.Int32, totalItems)
-	var produced, consumed atomix.Int64
-	var prodWg, consWg sync.WaitGroup
-	drainSignal := make(chan struct{})
-
-	// Single producer
-	prodWg.Add(1)
-	go func() {
-		defer prodWg.Done()
-		backoff := iox.Backoff{}
-		for idx := range totalItems {
-			for q.Enqueue(&values[idx]) != nil {
-				backoff.Wait()
-			}
-			produced.Add(1)
-			backoff.Reset()
-		}
-	}()
-
-	// Multiple consumers
-	for range numConsumers {
-		consWg.Add(1)
-		go func() {
-			defer consWg.Done()
-			backoff := iox.Backoff{}
-			draining := false
-			emptyCount := 0
-			for {
-				select {
-				case <-drainSignal:
-					draining = true
-				default:
-				}
-				v, err := q.Dequeue()
-				if err == nil {
-					emptyCount = 0
-					backoff.Reset()
-					if v >= 0 && v < totalItems {
-						seen[v].Add(1)
-					}
-					consumed.Add(1)
-				} else if draining {
-					emptyCount++
-					if emptyCount > 1000 {
-						return
-					}
-				} else {
-					backoff.Wait()
+	var wg sync.WaitGroup
+	next := make([]int, producers)
+	for p := range producers {
+		next[p] = p
+		wg.Go(func() {
+			for i := p; i < len(values); i += producers {
+				if err := enqueue(&values[i]); err != nil {
+					t.Errorf("Enqueue(%v) failed: %v", values[i], err)
+					return
 				}
 			}
-		}()
+		})
 	}
+	wg.Wait()
+	drain()
 
-	prodWg.Wait()
-	q.Drain()
-	close(drainSignal)
-	consWg.Wait()
-
-	var missing, duplicates int
-	for i := range totalItems {
-		count := seen[i].Load()
-		if count == 0 {
-			missing++
-		} else if count > 1 {
-			duplicates++
+	// Each producer's values must arrive in order. Producers may interleave.
+	for i := range values {
+		v, err := dequeue()
+		if err != nil {
+			t.Fatalf("Dequeue %d of %d failed: %v", i+1, len(values), err)
 		}
+		idx := slices.Index(values, v)
+		if idx < 0 {
+			t.Fatalf("Dequeue %d returned unknown value %v", i+1, v)
+		}
+		p := idx % producers
+		if idx != next[p] {
+			t.Fatalf("Dequeue %d returned index %d from producer %d, want %d", i+1, idx, p, next[p])
+		}
+		next[p] += producers
 	}
-
-	if duplicates > 0 {
-		t.Errorf("duplicates: %d", duplicates)
+	if v, err := dequeue(); err != lfq.ErrWouldBlock {
+		t.Fatalf("Dequeue after the batch returned (%v, %v), want ErrWouldBlock", v, err)
 	}
-	if missing > 0 {
-		t.Logf("missing: %d (produced=%d consumed=%d)", missing, produced.Load(), consumed.Load())
-	}
-
-	t.Logf("graceful shutdown: produced=%d consumed=%d", produced.Load(), consumed.Load())
 }
 
 func testGracefulShutdownMPMCIndirect(t *testing.T, q *lfq.MPMCIndirect, numProducers, numConsumers, itemsPerProd int) {
@@ -1887,7 +1741,6 @@ func testGracefulShutdownMPMCIndirect(t *testing.T, q *lfq.MPMCIndirect, numProd
 			defer consWg.Done()
 			backoff := iox.Backoff{}
 			draining := false
-			emptyCount := 0
 			for {
 				select {
 				case <-drainSignal:
@@ -1896,17 +1749,16 @@ func testGracefulShutdownMPMCIndirect(t *testing.T, q *lfq.MPMCIndirect, numProd
 				}
 				v, err := q.Dequeue()
 				if err == nil {
-					emptyCount = 0
 					backoff.Reset()
-					if int(v) >= 0 && int(v) < totalItems {
+					if v < uintptr(totalItems) {
 						seen[v].Add(1)
 					}
 					consumed.Add(1)
 				} else if draining {
-					emptyCount++
-					if emptyCount > 1000 {
-						return
+					if err != lfq.ErrWouldBlock {
+						t.Errorf("Dequeue after Drain returned %v, want ErrWouldBlock", err)
 					}
+					return
 				} else {
 					backoff.Wait()
 				}
@@ -1929,93 +1781,11 @@ func testGracefulShutdownMPMCIndirect(t *testing.T, q *lfq.MPMCIndirect, numProd
 		}
 	}
 
-	if duplicates > 0 {
-		t.Errorf("duplicates: %d", duplicates)
+	sent, received := produced.Load(), consumed.Load()
+	if sent != int64(totalItems) || received != sent || missing != 0 || duplicates != 0 {
+		t.Errorf("produced %d, consumed %d, want %d each (missing %d, duplicated %d)",
+			sent, received, totalItems, missing, duplicates)
 	}
-	if missing > 0 {
-		t.Logf("missing: %d (produced=%d consumed=%d)", missing, produced.Load(), consumed.Load())
-	}
-
-	t.Logf("graceful shutdown: produced=%d consumed=%d", produced.Load(), consumed.Load())
-}
-
-func testGracefulShutdownSPMCIndirect(t *testing.T, q *lfq.SPMCIndirect, numConsumers, totalItems int) {
-	t.Helper()
-
-	seen := make([]atomix.Int32, totalItems)
-	var produced, consumed atomix.Int64
-	var prodWg, consWg sync.WaitGroup
-	drainSignal := make(chan struct{})
-
-	prodWg.Add(1)
-	go func() {
-		defer prodWg.Done()
-		backoff := iox.Backoff{}
-		for idx := range totalItems {
-			for q.Enqueue(uintptr(idx)) != nil {
-				backoff.Wait()
-			}
-			produced.Add(1)
-			backoff.Reset()
-		}
-	}()
-
-	for range numConsumers {
-		consWg.Add(1)
-		go func() {
-			defer consWg.Done()
-			backoff := iox.Backoff{}
-			draining := false
-			emptyCount := 0
-			for {
-				select {
-				case <-drainSignal:
-					draining = true
-				default:
-				}
-				v, err := q.Dequeue()
-				if err == nil {
-					emptyCount = 0
-					backoff.Reset()
-					if int(v) >= 0 && int(v) < totalItems {
-						seen[v].Add(1)
-					}
-					consumed.Add(1)
-				} else if draining {
-					emptyCount++
-					if emptyCount > 1000 {
-						return
-					}
-				} else {
-					backoff.Wait()
-				}
-			}
-		}()
-	}
-
-	prodWg.Wait()
-	q.Drain()
-	close(drainSignal)
-	consWg.Wait()
-
-	var missing, duplicates int
-	for i := range totalItems {
-		count := seen[i].Load()
-		if count == 0 {
-			missing++
-		} else if count > 1 {
-			duplicates++
-		}
-	}
-
-	if duplicates > 0 {
-		t.Errorf("duplicates: %d", duplicates)
-	}
-	if missing > 0 {
-		t.Logf("missing: %d (produced=%d consumed=%d)", missing, produced.Load(), consumed.Load())
-	}
-
-	t.Logf("graceful shutdown: produced=%d consumed=%d", produced.Load(), consumed.Load())
 }
 
 // TestDrainThresholdExhaustion tests that Dequeue continues when threshold
