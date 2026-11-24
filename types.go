@@ -17,7 +17,7 @@ import "unsafe"
 //
 // Example:
 //
-//	q := lfq.NewMPMC[int](1024)
+//	q := lfq.NewSPSC[int](1024)
 //
 //	// Enqueue
 //	if err := q.Enqueue(new(42)); err != nil {
@@ -47,7 +47,7 @@ type Producer[T any] interface {
 	//
 	// Thread safety depends on queue type:
 	//   - SPSC: single producer only
-	//   - MPSC/MPMC: multiple producers safe
+	//   - MPSC/MPMC: concurrent producers within the concrete queue's limits
 	//   - SPMC: single producer only
 	Enqueue(elem *T) error
 }
@@ -68,7 +68,7 @@ type Consumer[T any] interface {
 	// Thread safety depends on queue type:
 	//   - SPSC: single consumer only
 	//   - MPSC: single consumer only
-	//   - SPMC/MPMC: multiple consumers safe
+	//   - SPMC/MPMC: see the concrete queue's consumer contract
 	Dequeue() (T, error)
 }
 
@@ -166,9 +166,10 @@ type ConsumerPtr interface {
 // FAA-based queues (MPMC, SPMC, MPSC) implement this interface.
 // SPSC queues do not implement Drainer as they have no threshold mechanism.
 //
-// For a batch in a new queue, wait for every producer's final Enqueue to
-// return, then call Drain. A single consumer makes the first Dequeue call
-// after Drain and continues until [ErrWouldBlock].
+// When sharing [MPMC], [SPMC], [SPMCIndirect] or [SPMCPtr], use a fresh
+// queue for one batch of at most Cap() items. Wait for every producer's final
+// Enqueue to return, then call Drain. The first Dequeue on the queue must
+// follow Drain. The same consumer continues until [ErrWouldBlock].
 //
 // The FAA SPMC queues and generic FAA MPMC queue skip their dequeue
 // threshold after Drain. MPMCIndirect and MPMCPtr can always drain
@@ -183,6 +184,7 @@ type ConsumerPtr interface {
 //	}
 //	// Drain the batch in this goroutine.
 type Drainer interface {
-	// Drain is a shutdown hint. All producers must finish before the call.
+	// Drain signals that all producers have finished. For the batch protocol
+	// in [Drainer], call it before the first Dequeue.
 	Drain()
 }

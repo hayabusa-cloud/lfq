@@ -661,11 +661,11 @@ func TestMPSCConcurrentProducers(t *testing.T) {
 	}
 }
 
-func TestSPMCConcurrentConsumers(t *testing.T) {
+func TestSPMCSeqConcurrentConsumers(t *testing.T) {
 	if lfq.RaceEnabled {
 		t.Skip("skip: lock-free algorithm uses cross-variable memory ordering")
 	}
-	q := lfq.NewSPMC[int](1024)
+	q := lfq.NewSPMCSeq[int](1024)
 	numItems := 800
 	numConsumers := 8
 
@@ -1348,11 +1348,8 @@ func TestCoverageStaleSlotMPSC(t *testing.T) {
 // Coverage: emptyFlag Path (MPMC Compact)
 // =============================================================================
 
-// TestCoverageEmptyFlagMPMCCompact exercises the transient emptyFlag path in
-// MPMCCompactIndirect.Dequeue. With a small capacity and many concurrent
-// workers, consumers occasionally read a slot still marked with emptyFlag
-// from a previous round (producer allocated via tail advance but has not yet
-// written the value). This covers mpmc_compact.go:116-118.
+// TestCoverageEmptyFlagMPMCCompact exercises slot reuse under contention.
+// A consumer can see a slot another consumer has marked empty before the head advances.
 func TestCoverageEmptyFlagMPMCCompact(t *testing.T) {
 	if lfq.RaceEnabled {
 		t.Skip("skip: lock-free algorithm uses cross-variable memory ordering")
@@ -1363,12 +1360,12 @@ func TestCoverageEmptyFlagMPMCCompact(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(workers)
-	for range workers {
+	for worker := range workers {
 		go func() {
 			defer wg.Done()
 			backoff := iox.Backoff{}
 			for i := range opsPerWorker {
-				v := uintptr(i + 1)
+				v := uintptr(worker*opsPerWorker + i + 1)
 				for q.Enqueue(v) != nil {
 					backoff.Wait()
 				}

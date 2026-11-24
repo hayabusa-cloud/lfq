@@ -14,7 +14,7 @@ import (
 // The single producer writes sequentially. Consumers use CAS to claim slots.
 //
 // This is the Compact variant using n slots (vs 2n for FAA-based default).
-// Use NewSPMC for the default FAA-based implementation with better scalability.
+// Use [SPMC] for batches with a single draining consumer.
 //
 // Memory: n slots (16 bytes per slot)
 type SPMCSeq[T any] struct {
@@ -36,7 +36,6 @@ type spmcSeqSlot[T any] struct {
 
 // NewSPMCSeq creates a new CAS-based SPMC queue.
 // Capacity rounds up to the next power of 2.
-// This is the Compact variant. Use NewSPMC for the default FAA-based implementation.
 func NewSPMCSeq[T any](capacity int) *SPMCSeq[T] {
 	q := &SPMCSeq[T]{}
 	q.Init(capacity)

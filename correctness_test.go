@@ -424,14 +424,13 @@ func TestMPSCFIFOOrderingPerProducer(t *testing.T) {
 	}
 }
 
-// TestSPMCFIFOOrderingPerConsumer verifies FIFO ordering across consumers.
-// No item should be consumed twice and all items should be consumed.
-func TestSPMCFIFOOrderingPerConsumer(t *testing.T) {
+// TestSPMCSeqConcurrentDelivery checks that consumers receive each item once.
+func TestSPMCSeqConcurrentDelivery(t *testing.T) {
 	if lfq.RaceEnabled {
 		t.Skip("skip: FIFO test requires precise timing")
 	}
 
-	q := lfq.NewSPMC[int](2048)
+	q := lfq.NewSPMCSeq[int](2048)
 	const (
 		numConsumers = 2 // Reduced for faster execution
 		totalItems   = 2000
@@ -551,8 +550,7 @@ func TestLinearizability(t *testing.T) {
 // Progress (Liveness) Tests
 // =============================================================================
 
-// TestMPMCProgress verifies system-wide progress under contention.
-// Uses Compact queue for reliable performance.
+// TestMPMCProgress checks that concurrent workers complete a fixed number of transfers.
 func TestMPMCProgress(t *testing.T) {
 	if lfq.RaceEnabled {
 		t.Skip("skip: progress test requires high contention")
@@ -566,23 +564,20 @@ func TestMPMCProgress(t *testing.T) {
 		totalItems   = 5000
 	)
 
-	var produced, consumed atomix.Int64
+	var consumed atomix.Int64
 	var wg sync.WaitGroup
 
-	// Producers
-	for range numProducers {
+	// Each producer owns distinct values for the compact queue.
+	for producer := range numProducers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			backoff := iox.Backoff{}
-			for produced.Load() < totalItems {
-				v := uintptr(produced.Load() + 1)
-				if q.Enqueue(v) == nil {
-					produced.Add(1)
-					backoff.Reset()
-				} else {
+			for value := producer + 1; value <= totalItems; value += numProducers {
+				for q.Enqueue(uintptr(value)) != nil {
 					backoff.Wait()
 				}
+				backoff.Reset()
 			}
 		}()
 	}
@@ -606,10 +601,8 @@ func TestMPMCProgress(t *testing.T) {
 
 	wg.Wait()
 
-	// Verify progress was made
-	if consumed.Load() < totalItems {
-		t.Errorf("Not all items consumed: produced=%d consumed=%d target=%d",
-			produced.Load(), consumed.Load(), totalItems)
+	if got := consumed.Load(); got != totalItems {
+		t.Errorf("consumed %d items, want %d", got, totalItems)
 	}
 }
 

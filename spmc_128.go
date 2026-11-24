@@ -12,6 +12,8 @@ import (
 )
 
 // SPMCIndirect is an FAA-based SPMC queue for uintptr values.
+// When sharing the queue, follow the batch protocol in [Drainer].
+// Use [SPMCIndirectSeq] for live polling or concurrent consumers.
 //
 // Uses 128-bit atomic operations to pack cycle and value into a single
 // atomic entry. Based on SCQ algorithm with 2n slots for capacity n.
@@ -100,7 +102,7 @@ func (q *SPMCIndirect) Enqueue(elem uintptr) error {
 	return nil
 }
 
-// Dequeue removes and returns an element (multiple consumers safe).
+// Dequeue removes and returns an element.
 // Returns (0, ErrWouldBlock) if the queue is empty.
 func (q *SPMCIndirect) Dequeue() (uintptr, error) {
 	// Early exit via threshold (livelock prevention)
@@ -167,6 +169,8 @@ func (q *SPMCIndirect) Cap() int {
 }
 
 // SPMCPtr is an FAA-based SPMC queue for unsafe.Pointer values.
+// When sharing the queue, follow the batch protocol in [Drainer].
+// Use [SPMCPtrSeq] for live polling or concurrent consumers.
 //
 // Uses 128-bit atomic operations. Based on SCQ algorithm with 2n slots.
 //
@@ -251,7 +255,7 @@ func (q *SPMCPtr) Enqueue(elem unsafe.Pointer) error {
 	return nil
 }
 
-// Dequeue removes and returns an element (multiple consumers safe).
+// Dequeue removes and returns an element.
 // Returns (nil, ErrWouldBlock) if the queue is empty.
 func (q *SPMCPtr) Dequeue() (unsafe.Pointer, error) {
 	// Early exit via threshold (livelock prevention)

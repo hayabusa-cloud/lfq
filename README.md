@@ -31,8 +31,8 @@ q := lfq.NewSPSC[Event](1024)
 // Builder API - auto-selects algorithm based on constraints
 q := lfq.Build[Event](lfq.New(1024).SingleProducer().SingleConsumer())  // → SPSC
 q := lfq.Build[Event](lfq.New(1024).SingleConsumer())                   // → MPSC
-q := lfq.Build[Event](lfq.New(1024).SingleProducer())                   // → SPMC
-q := lfq.Build[Event](lfq.New(1024))                                    // → MPMC
+q := lfq.Build[Event](lfq.New(1024).SingleProducer().Compact())         // → SPMCSeq
+q := lfq.Build[Event](lfq.New(1024).Compact())                          // → MPMCSeq
 ```
 
 ## Installation
@@ -71,7 +71,7 @@ The Atomix compiler inlines `atomix` operations. CI runs correctness tests with 
 
 ## Benchmarks
 
-CI runs `make bench-ci` on native Linux amd64 and arm64 with the Atomix compiler and `GOMAXPROCS=2`. Each Actions summary shows the median of ten samples for session handoff and retry, an enqueue/dequeue pair on each of the four queue types, and SPMC with concurrent consumers. The workflow artifacts contain the raw samples.
+CI runs `make bench-ci` on native Linux amd64 and arm64 with the Atomix compiler and `GOMAXPROCS=2`. Each Actions summary shows the median of ten samples for session handoff and retry, an enqueue/dequeue pair on each of the four queue types, and `SPMCIndirectSeq` with concurrent consumers. The workflow artifacts contain the raw samples.
 
 `Handoff` transfers one value between two goroutines through the four-slot SPSC data queue used by `sess` or a buffered Go channel of the same capacity. Both use `iox.Backoff` on a full or empty queue. `ns/op` includes that wait time, and `waits/op` counts waits on both sides per delivered value.
 
@@ -114,15 +114,19 @@ Default multi-access queues use fetch-and-add (FAA) to claim positions in a ring
 - **Trade-off**: Requires `2n` physical slots for nominal capacity `n`.
 - **Transient Capacity**: With `P` concurrent producers, up to `P-1` additional items may be transiently enqueued beyond `Cap()` before backpressure applies.
 
+For `MPSC[T]`, `MPSCIndirect` and `MPSCPtr`, at most `Cap()` calls to `Enqueue` may be in flight, including calls from paused producers.
+
+When sharing `MPMC[T]`, `SPMC[T]`, `SPMCIndirect` or `SPMCPtr`, fill a fresh queue with one batch of at most `Cap()` items and follow the [single-consumer drain protocol](#graceful-shutdown). Use the corresponding `Seq` queue when consumers poll during production or dequeue concurrently.
+
 ```go
 // Multiple producers, single consumer
 q := lfq.NewMPSC[Event](1024)  // FAA producers, wait-free dequeue
 
-// Single producer, multiple consumers
-q := lfq.NewSPMC[Task](1024)   // Wait-free enqueue, FAA consumers
+// One producer fills a fresh batch
+q := lfq.NewSPMC[Task](1024)
 
-// Multiple producers and consumers
-q := lfq.NewMPMC[*Request](4096)  // FAA-based SCQ algorithm
+// Multiple producers fill a fresh batch
+q := lfq.NewMPMC[*Request](4096)
 ```
 
 Cycle-based slot validation provides ABA safety without epoch counters or hazard pointers.
@@ -155,7 +159,7 @@ q := lfq.Build[T](lfq.New(1024).SingleConsumer())
 // SPMC - single producer only
 q := lfq.Build[T](lfq.New(1024).SingleProducer())
 
-// MPMC - no constraints (default)
+// MPMC - default builder options
 q := lfq.Build[T](lfq.New(1024))
 ```
 
@@ -270,7 +274,7 @@ type Event struct {
 }
 
 // Multiple sources → Single processor
-events := lfq.NewMPSC[Event](8192)
+events := lfq.NewMPSC[Event](max(8192, len(sensors)))
 
 // Event sources (multiple producers)
 for sensor := range slices.Values(sensors) {
@@ -365,7 +369,7 @@ for {
 │    Yes     │     No                  Yes     │     No          │
 │     │      │      │                   │      │      │          │
 │     ▼      │      ▼                   ▼      │      ▼          │
-│   SPSC     │    SPMC                MPSC     │    MPMC         │
+│  SPSC[T]   │  SPMCSeq[T]           MPSC[T]   │  MPMCSeq[T]     │
 │            │                                 │                  │
 └────────────┴─────────────────────────────────┴─────────────────┘
 

@@ -17,7 +17,7 @@ import (
 //   - Good performance under moderate contention
 //
 // This is the Compact variant using n slots (vs 2n for FAA-based default).
-// Use NewMPMC for the default FAA-based implementation with better scalability.
+// Use [MPMC] for batches with a single draining consumer.
 //
 // Memory: n slots (16+ bytes per slot)
 type MPMCSeq[T any] struct {
@@ -39,7 +39,6 @@ type mpmcSeqSlot[T any] struct {
 
 // NewMPMCSeq creates a new CAS-based MPMC queue.
 // Capacity rounds up to the next power of 2.
-// This is the Compact variant. Use NewMPMC for the default FAA-based implementation.
 func NewMPMCSeq[T any](capacity int) *MPMCSeq[T] {
 	q := &MPMCSeq[T]{}
 	q.Init(capacity)

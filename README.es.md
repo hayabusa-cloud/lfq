@@ -31,8 +31,8 @@ q := lfq.NewSPSC[Event](1024)
 // Builder API - selecciona automáticamente el algoritmo según restricciones
 q := lfq.Build[Event](lfq.New(1024).SingleProducer().SingleConsumer())  // → SPSC
 q := lfq.Build[Event](lfq.New(1024).SingleConsumer())                   // → MPSC
-q := lfq.Build[Event](lfq.New(1024).SingleProducer())                   // → SPMC
-q := lfq.Build[Event](lfq.New(1024))                                    // → MPMC
+q := lfq.Build[Event](lfq.New(1024).SingleProducer().Compact())         // → SPMCSeq
+q := lfq.Build[Event](lfq.New(1024).Compact())                          // → MPMCSeq
 ```
 
 ## Instalación
@@ -71,7 +71,7 @@ El compilador Atomix integra en línea las operaciones de `atomix`. La CI ejecut
 
 ## Pruebas de rendimiento
 
-La CI ejecuta `make bench-ci` en máquinas Linux amd64 y arm64 nativas con el compilador Atomix y `GOMAXPROCS=2`. El resumen de Actions muestra la mediana de diez muestras para la transferencia y el reintento de sesión, un par de operaciones de inserción y extracción en cada uno de los cuatro tipos de cola y SPMC con consumidores concurrentes. Los artefactos de la ejecución contienen las muestras originales.
+La CI ejecuta `make bench-ci` en máquinas Linux amd64 y arm64 nativas con el compilador Atomix y `GOMAXPROCS=2`. El resumen de Actions muestra la mediana de diez muestras para la transferencia y el reintento de sesión, un par de operaciones de inserción y extracción en cada uno de los cuatro tipos de cola y `SPMCIndirectSeq` con consumidores concurrentes. Los artefactos de la ejecución contienen las muestras originales.
 
 `Handoff` transfiere un valor entre dos goroutines mediante la cola de datos SPSC de cuatro posiciones que usa `sess` o un canal de Go con búfer de la misma capacidad. Ambos usan `iox.Backoff` cuando la cola está llena o vacía. `ns/op` incluye el tiempo de espera y `waits/op` cuenta las esperas de ambos extremos por valor entregado.
 
@@ -114,15 +114,19 @@ Las colas de acceso múltiple predeterminadas reservan posiciones mediante fetch
 - **Compensación**: Requiere `2n` slots físicos para una capacidad nominal `n`.
 - **Capacidad transitoria**: Con `P` productores concurrentes, hasta `P-1` elementos adicionales pueden encolarse transitoriamente por encima de `Cap()` antes de que aplique la contrapresión.
 
+En `MPSC[T]`, `MPSCIndirect` y `MPSCPtr` puede haber como máximo `Cap()` llamadas a `Enqueue` en curso, incluidas las de productores en pausa.
+
+Al compartir `MPMC[T]`, `SPMC[T]`, `SPMCIndirect` o `SPMCPtr`, use una cola recién inicializada para un solo lote de hasta `Cap()` elementos y siga el [protocolo de vaciado con un único consumidor](#apagado-elegante). Use la cola `Seq` correspondiente si los consumidores consultan la cola durante la producción o extraen elementos en paralelo.
+
 ```go
 // Múltiples productores, consumidor único
 q := lfq.NewMPSC[Event](1024)  // Productores FAA, dequeue sin espera
 
-// Productor único, múltiples consumidores
-q := lfq.NewSPMC[Task](1024)   // Enqueue sin espera, consumidores FAA
+// Un productor llena un lote en una cola nueva
+q := lfq.NewSPMC[Task](1024)
 
-// Múltiples productores y consumidores
-q := lfq.NewMPMC[*Request](4096)  // Algoritmo SCQ basado en FAA
+// Varios productores llenan un lote en una cola nueva
+q := lfq.NewMPMC[*Request](4096)
 ```
 
 La validación de slots basada en ciclos proporciona seguridad ABA sin contadores de época ni punteros de riesgo.
@@ -155,7 +159,7 @@ q := lfq.Build[T](lfq.New(1024).SingleConsumer())
 // SPMC - solo productor único
 q := lfq.Build[T](lfq.New(1024).SingleProducer())
 
-// MPMC - sin restricciones (predeterminado)
+// MPMC - opciones predeterminadas del constructor
 q := lfq.Build[T](lfq.New(1024))
 ```
 
@@ -270,7 +274,7 @@ type Event struct {
 }
 
 // Múltiples fuentes → Procesador único
-events := lfq.NewMPSC[Event](8192)
+events := lfq.NewMPSC[Event](max(8192, len(sensors)))
 
 // Fuentes de eventos (múltiples productores)
 for sensor := range slices.Values(sensors) {
@@ -365,7 +369,7 @@ En las variantes basadas en FAA, `Drain()` desactiva el umbral de extracción de
 │    Sí      │     No                  Sí      │     No          │
 │     │      │      │                   │      │      │          │
 │     ▼      │      ▼                   ▼      │      ▼          │
-│   SPSC     │    SPMC                MPSC     │    MPMC         │
+│  SPSC[T]   │  SPMCSeq[T]           MPSC[T]   │  MPMCSeq[T]     │
 │            │                                 │                  │
 └────────────┴─────────────────────────────────┴─────────────────┘
 

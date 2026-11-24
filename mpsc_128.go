@@ -12,6 +12,7 @@ import (
 )
 
 // MPSCIndirect is an FAA-based MPSC queue for uintptr values.
+// At most Cap() calls to Enqueue may be in flight, including paused calls.
 //
 // Uses 128-bit atomic operations to pack cycle and value into a single
 // atomic entry. Based on SCQ algorithm with 2n slots for capacity n.
@@ -68,7 +69,7 @@ func (q *MPSCIndirect) Drain() {
 	q.draining.StoreRelease(true)
 }
 
-// Enqueue adds an element to the queue (multiple producers safe).
+// Enqueue adds an element to the queue. At most Cap() calls may overlap.
 // Returns ErrWouldBlock if the queue is full.
 func (q *MPSCIndirect) Enqueue(elem uintptr) error {
 	sw := spin.Wait{}
@@ -131,6 +132,7 @@ func (q *MPSCIndirect) Cap() int {
 }
 
 // MPSCPtr is an FAA-based MPSC queue for unsafe.Pointer values.
+// At most Cap() calls to Enqueue may be in flight, including paused calls.
 //
 // Uses 128-bit atomic operations. Based on SCQ algorithm with 2n slots.
 //
@@ -186,7 +188,7 @@ func (q *MPSCPtr) Drain() {
 	q.draining.StoreRelease(true)
 }
 
-// Enqueue adds an element to the queue (multiple producers safe).
+// Enqueue adds an element to the queue. At most Cap() calls may overlap.
 // Returns ErrWouldBlock if the queue is full.
 func (q *MPSCPtr) Enqueue(elem unsafe.Pointer) error {
 	sw := spin.Wait{}

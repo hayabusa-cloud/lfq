@@ -30,7 +30,7 @@ type Options struct {
 //	// SPSC queue (optimal for single producer/consumer)
 //	q := lfq.BuildSPSC[Event](lfq.New(1024).SingleProducer().SingleConsumer())
 //
-//	// MPMC queue (default, general purpose)
+//	// MPMC queue for a batch
 //	q := lfq.BuildMPMC[Request](lfq.New(4096))
 //
 //	// Compact indirect queue for memory efficiency

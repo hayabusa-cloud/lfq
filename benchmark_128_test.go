@@ -285,7 +285,7 @@ func BenchmarkMPSCCompactIndirect_SingleOp(b *testing.B) {
 }
 
 func BenchmarkMPSCIndirect_ParallelProducers(b *testing.B) {
-	q := lfq.NewMPSCIndirect(4096)
+	q := lfq.NewMPSCIndirect(max(4096, runtime.GOMAXPROCS(0)))
 	var consumed atomix.Int64
 
 	// Single consumer in background
@@ -375,8 +375,8 @@ func BenchmarkSPMCCompactIndirect_SingleOp(b *testing.B) {
 	}
 }
 
-func BenchmarkSPMCIndirect_ParallelConsumers(b *testing.B) {
-	q := lfq.NewSPMCIndirect(4096)
+func BenchmarkSPMCIndirectSeq_ParallelConsumers(b *testing.B) {
+	q := lfq.NewSPMCIndirectSeq(4096)
 
 	// Single producer in background
 	done := make(chan struct{})
@@ -676,12 +676,12 @@ func BenchmarkMPSC_ContentionLevels(b *testing.B) {
 	}
 }
 
-func BenchmarkSPMC_ContentionLevels(b *testing.B) {
+func BenchmarkSPMCIndirectSeq_ContentionLevels(b *testing.B) {
 	workerCounts := []int{2, 4, 8, 16}
 
 	for _, workers := range workerCounts {
 		b.Run(fmt.Sprintf("Consumers%d", workers), func(b *testing.B) {
-			q := lfq.NewSPMCIndirect(1024)
+			q := lfq.NewSPMCIndirectSeq(1024)
 			opsPerWorker := b.N / workers
 			if opsPerWorker < 1 {
 				opsPerWorker = 1
