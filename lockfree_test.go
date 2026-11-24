@@ -522,24 +522,17 @@ func TestMediumContentionCompact(t *testing.T) {
 	if lfq.RaceEnabled {
 		t.Skip("skip: lock-free algorithm uses cross-variable memory ordering")
 	}
-	tests := []struct {
-		name      string
-		producers int
-		consumers int
-		capacity  int
-		items     int
-	}{
-		{"MPMCCompact_4x4", 4, 4, 512, 1000},
-		{"MPSCCompact_8x1", 8, 1, 512, 1000},
-		{"SPMCCompact_1x8", 1, 8, 512, 1000},
-	}
+	const capacity, items = 512, 1000
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			q := lfq.NewMPMCCompactIndirect(tt.capacity)
-			testMediumContentionCompact(t, q, tt.producers, tt.consumers, tt.items)
-		})
-	}
+	t.Run("MPMCCompact_4x4", func(t *testing.T) {
+		testMediumContentionCompact(t, lfq.NewMPMCCompactIndirect(capacity), 4, 4, items)
+	})
+	t.Run("MPSCCompact_8x1", func(t *testing.T) {
+		testMediumContentionCompact(t, lfq.NewMPSCCompactIndirect(capacity), 8, 1, items)
+	})
+	t.Run("SPMCCompact_1x8", func(t *testing.T) {
+		testMediumContentionCompact(t, lfq.NewSPMCCompactIndirect(capacity), 1, 8, items)
+	})
 }
 
 func testMediumContention(t *testing.T, q *lfq.MPMC[int], numP, numC, totalItems int) {
@@ -813,10 +806,9 @@ func testMediumContentionIndirect(t *testing.T, q *lfq.MPMCIndirect, numP, numC,
 	t.Logf("Medium contention (Indirect): produced=%d, consumed=%d, missing=%d", produced.Load(), consumed.Load(), missing)
 }
 
-func testMediumContentionCompact(t *testing.T, q *lfq.MPMCCompactIndirect, numP, numC, totalItems int) {
+func testMediumContentionCompact(t *testing.T, q lfq.QueueIndirect, numP, numC, totalItems int) {
 	t.Helper()
 
-	itemsPerProd := totalItems / numP
 	var wg sync.WaitGroup
 	var produced, consumed atomix.Int64
 	seenValues := make([]atomix.Int32, totalItems+1)
@@ -829,20 +821,14 @@ func testMediumContentionCompact(t *testing.T, q *lfq.MPMCCompactIndirect, numP,
 		go func(id int) {
 			defer wg.Done()
 			backoff := iox.Backoff{}
-			for i := range itemsPerProd {
-				select {
-				case <-done:
-					return
-				default:
-				}
-				v := uintptr(id*itemsPerProd + i + 1)
+			for value := id + 1; value <= totalItems; value += numP {
 				for {
 					select {
 					case <-done:
 						return
 					default:
 					}
-					if q.Enqueue(v) == nil {
+					if q.Enqueue(uintptr(value)) == nil {
 						produced.Add(1)
 						backoff.Reset()
 						break
@@ -858,6 +844,7 @@ func testMediumContentionCompact(t *testing.T, q *lfq.MPMCCompactIndirect, numP,
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			backoff := iox.Backoff{}
 			for {
 				select {
 				case <-done:
@@ -873,6 +860,9 @@ func testMediumContentionCompact(t *testing.T, q *lfq.MPMCCompactIndirect, numP,
 						seenValues[int(v)].Add(1)
 					}
 					consumed.Add(1)
+					backoff.Reset()
+				} else {
+					backoff.Wait()
 				}
 			}
 		}()
@@ -911,16 +901,11 @@ func testMediumContentionCompact(t *testing.T, q *lfq.MPMCCompactIndirect, numP,
 		}
 	}
 
-	if duplicates > 0 {
-		t.Errorf("Duplicated %d items (data corruption)", duplicates)
+	sent, received := produced.Load(), consumed.Load()
+	if sent != int64(totalItems) || received != sent || missing != 0 || duplicates != 0 {
+		t.Errorf("produced %d, consumed %d, want %d each (missing %d, duplicated %d)",
+			sent, received, totalItems, missing, duplicates)
 	}
-
-	// Only check missing if test completed (not timed out)
-	if consumed.Load() >= int64(totalItems) && missing > 0 {
-		t.Logf("Missing %d items (queue loss)", missing)
-	}
-
-	t.Logf("Medium contention (Compact): produced=%d, consumed=%d, missing=%d", produced.Load(), consumed.Load(), missing)
 }
 
 // =============================================================================
