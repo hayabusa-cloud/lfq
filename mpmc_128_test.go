@@ -158,8 +158,8 @@ func TestMPMCPtr128RollsBackFullRingClaim(t *testing.T) {
 	}
 }
 
-func TestMPMCPtr128NilPointer(t *testing.T) {
-	q := lfq.NewMPMCPtr(4)
+func TestMPMCPtr128NilPointerWithPendingClaims(t *testing.T) {
+	q := lfq.MPMCPtrWithPendingClaimsForTest()
 
 	// nil is a valid unsafe.Pointer value
 	if err := q.Enqueue(nil); err != nil {

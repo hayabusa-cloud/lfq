@@ -21,3 +21,11 @@ func MPMCPtrWithAdmittedBurstForTest(capacity int) (*MPMCPtr, func() uint64) {
 	q.capacity = uint64(len(q.buffer) + 1)
 	return q, q.tail.LoadRelaxed
 }
+
+// MPMCPtrWithPendingClaimsForTest models two producers paused after claiming
+// the first two tickets, before either has published a pointer.
+func MPMCPtrWithPendingClaimsForTest() *MPMCPtr {
+	q := NewMPMCPtr(2)
+	q.tail.StoreRelaxed(q.capacity)
+	return q
+}
