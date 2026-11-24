@@ -6,6 +6,7 @@ package lfq_test
 
 import (
 	"errors"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -275,7 +276,7 @@ func TestMPMCIndirect128ConcurrentMPMC(t *testing.T) {
 		}(p)
 	}
 
-	// Consumers: run until producersDone + drain with timeout
+	// Consumers run until the producers finish.
 	for range consumers {
 		consumerWg.Add(1)
 		go func() {
@@ -297,39 +298,30 @@ func TestMPMCIndirect128ConcurrentMPMC(t *testing.T) {
 	producersDone.Store(true)
 	consumerWg.Wait()
 
-	// Final drain with timeout (threshold exhaustion may prevent complete drain)
-	drainDeadline := time.Now().Add(500 * time.Millisecond)
-	backoff := iox.Backoff{}
-	consecutiveFailures := 0
-	for time.Now().Before(drainDeadline) {
+	// All workers have joined. Check for an extra value as well as missing ones.
+	for totalDequeued.Load() <= totalItems {
 		if v, err := q.Dequeue(); err == nil {
 			recordValue(v)
-			consecutiveFailures = 0
-			backoff.Reset()
 		} else {
-			consecutiveFailures++
-			if consecutiveFailures > 1000 {
-				break // Likely threshold exhausted
-			}
-			backoff.Wait()
+			break
 		}
 	}
 
-	// Verify linearizability: no duplicates
-	var duplicates int
+	if got := totalDequeued.Load(); got != totalItems {
+		t.Fatalf("dequeued %d/%d", got, totalItems)
+	}
 	for i := range totalItems {
-		if seen[i].Load() > 1 {
-			duplicates++
+		if n := seen[i].Load(); n != 1 {
+			t.Fatalf("value %d delivered %d times", i, n)
 		}
 	}
-	if duplicates > 0 {
-		t.Errorf("linearizability violation: %d duplicates detected", duplicates)
+	for i := range q.Cap() {
+		if err := q.Enqueue(0); err != nil {
+			t.Fatalf("refill at %d/%d: %v", i, q.Cap(), err)
+		}
 	}
-
-	// Log missing items (threshold exhaustion is valid SCQ behavior)
-	if totalDequeued.Load() < totalItems {
-		t.Logf("note: dequeued %d/%d (threshold exhaustion during drain is expected)",
-			totalDequeued.Load(), totalItems)
+	if err := q.Enqueue(0); !errors.Is(err, lfq.ErrWouldBlock) {
+		t.Fatalf("full enqueue: %v", err)
 	}
 }
 
@@ -406,40 +398,24 @@ func TestMPMCPtr128ConcurrentMPMC(t *testing.T) {
 	producersDone.Store(true)
 	consumerWg.Wait()
 
-	// Final drain with timeout (threshold exhaustion may prevent complete drain)
-	drainDeadline := time.Now().Add(500 * time.Millisecond)
-	backoff := iox.Backoff{}
-	consecutiveFailures := 0
-	for time.Now().Before(drainDeadline) {
+	// All workers have joined. Check for an extra value as well as missing ones.
+	for totalDequeued.Load() <= totalItems {
 		if ptr, err := q.Dequeue(); err == nil {
 			recordValue(ptr)
-			consecutiveFailures = 0
-			backoff.Reset()
 		} else {
-			consecutiveFailures++
-			if consecutiveFailures > 1000 {
-				break // Likely threshold exhausted
-			}
-			backoff.Wait()
+			break
 		}
 	}
 
-	// Verify linearizability: no duplicates
-	var duplicates int
+	if got := totalDequeued.Load(); got != totalItems {
+		t.Fatalf("dequeued %d/%d", got, totalItems)
+	}
 	for i := range totalItems {
-		if seen[i].Load() > 1 {
-			duplicates++
+		if n := seen[i].Load(); n != 1 {
+			t.Fatalf("value %d delivered %d times", i, n)
 		}
 	}
-	if duplicates > 0 {
-		t.Errorf("linearizability violation: %d duplicates detected", duplicates)
-	}
-
-	// Log missing items (threshold exhaustion is valid SCQ behavior)
-	if totalDequeued.Load() < totalItems {
-		t.Logf("note: dequeued %d/%d (threshold exhaustion during drain is expected)",
-			totalDequeued.Load(), totalItems)
-	}
+	runtime.KeepAlive(items)
 }
 
 // =============================================================================
@@ -452,4 +428,20 @@ func TestMPMCIndirect128ImplementsInterface(t *testing.T) {
 
 func TestMPMCPtr128ImplementsInterface(t *testing.T) {
 	var _ lfq.QueuePtr = lfq.NewMPMCPtr(8)
+}
+
+func TestMPMCSeqHelpsStalledCursors(t *testing.T) {
+	words, ptrs := lfq.StalledMPMCSeqForTest()
+	if err := words.Enqueue(7); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := words.Dequeue(); got != 7 || err != nil {
+		t.Fatalf("dequeue after stalled workers = (%d, %v), want (7, nil)", got, err)
+	}
+	if err := ptrs.Enqueue(nil); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := ptrs.Dequeue(); got != nil || err != nil {
+		t.Fatalf("dequeue after stalled workers = (%p, %v), want (nil, nil)", got, err)
+	}
 }

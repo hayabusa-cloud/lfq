@@ -85,8 +85,10 @@ func (q *MPMCIndirectSeq) Enqueue(elem uintptr) error {
 		} else if diff < 0 {
 			// Queue is full (slot from old round not yet consumed)
 			return ErrWouldBlock
+		} else {
+			// The slot was published. Its owner may have paused before advancing tail.
+			q.tail.CompareAndSwapRelaxed(tail, tail+1)
 		}
-		// diff > 0: another producer succeeded, retry with fresh tail
 		sw.Once()
 	}
 }
@@ -108,6 +110,9 @@ func (q *MPMCIndirectSeq) Dequeue() (uintptr, error) {
 			}
 		} else if diff < 0 {
 			return 0, ErrWouldBlock
+		} else {
+			// The slot was consumed. Its owner may have paused before advancing head.
+			q.head.CompareAndSwapRelaxed(head, head+1)
 		}
 		sw.Once()
 	}
@@ -183,6 +188,8 @@ func (q *MPMCPtrSeq) Enqueue(elem unsafe.Pointer) error {
 			}
 		} else if diff < 0 {
 			return ErrWouldBlock
+		} else {
+			q.tail.CompareAndSwapRelaxed(tail, tail+1)
 		}
 		sw.Once()
 	}
@@ -205,6 +212,8 @@ func (q *MPMCPtrSeq) Dequeue() (unsafe.Pointer, error) {
 			}
 		} else if diff < 0 {
 			return nil, ErrWouldBlock
+		} else {
+			q.head.CompareAndSwapRelaxed(head, head+1)
 		}
 		sw.Once()
 	}

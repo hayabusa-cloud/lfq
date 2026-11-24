@@ -18,7 +18,7 @@ Go 语言的无锁和无等待 FIFO 队列实现。
 `lfq` 建立在经典的并发计算研究之上，提供严格有界的、无锁（Lock-free）和无等待（Wait-free）队列：
 
 - **Lamport 环形缓冲区 (1977)**：驱动我们的单生产者/单消费者 (SPSC) 路径，提供严格的 $O(1)$ 无等待延迟，无需昂贵的原子读-修改-写指令。
-- **Scalable Circular Queue (SCQ, 2019)**：我们的多方 (MPSC, SPMC, MPMC) 路径基于 Ruslan Nikolaev 的 SCQ 算法实现。通过使用硬件 Fetch-And-Add (FAA) 指令代替 CAS 循环，`lfq` 从本质上避免了竞争瓶颈和 ABA 问题，作为独立队列运行，无需外部安全内存回收机制（如 hazard pointers）。
+- **Scalable Circular Queue（SCQ，2019）**。泛型 FAA 队列基于 Ruslan Nikolaev 的 SCQ 算法。
 
 ### `iox` 非阻塞 I/O 栈
 
@@ -107,7 +107,7 @@ elem, err := q.Dequeue()  // 无等待 O(1)
 
 ### MPSC/SPMC/MPMC: 基于 FAA（默认）
 
-默认情况下，多访问队列基于 SCQ（可扩展环形队列）算法实现，使用 FAA（Fetch-And-Add）指令。FAA 盲目递增位置计数器，对于容量 n 需要 2n 个物理槽位，但在高争用情况下比基于 CAS 的替代方案扩展性更好。
+默认的多方队列使用 fetch-and-add（FAA）在包含 `2n` 个槽位的环中预留位置。`MPMCIndirect` 和 `MPMCPtr` 按连续的槽位位置依次发布和取出值。如果预留下一个位置的调用方暂停，其他调用方可以使用该位置。
 
 - **权衡**：名义容量为 `n` 时需要 `2n` 个物理槽位。
 - **瞬时容量**：当有 `P` 个并发生产者时，在背压生效前，可能会短暂入队最多 `P-1` 个超过 `Cap()` 的额外元素。
@@ -129,10 +129,10 @@ q := lfq.NewMPMC[*Request](4096)  // 基于 FAA 的 SCQ 算法
 
 Indirect 和 Ptr 队列变体（除 Compact Indirect 外的所有非 SPSC 变体）将序列号和载荷打包到单个 128 位原子操作中。这减少了缓存行争用，提高了高并发下的吞吐量。
 
-对于将指针编码到 128 位槽位中的 Ptr 变体（FAA 和 PtrSeq 变体），调用方必须在对象被出队（或已确认被消费）前保留其强类型 Go 引用。不要仅依赖队列中存储的指针位模式作为 GC 可达性根。
+对于将指针编码到 128 位槽位中的 Ptr 变体（FAA 和 PtrSeq），调用方须保留每个 Go 对象的有类型引用并保持其地址稳定，直到消费者取得所有权。
 
 ```go
-// Indirect - 每次操作单个 128 位原子
+// Indirect 将序列号和值存储在同一个原子对中。
 q := lfq.NewMPMCIndirect(4096)
 
 // Ptr - unsafe.Pointer 同样优化
@@ -320,7 +320,7 @@ return false
 
 ### 优雅关闭
 
-基于 FAA 的多消费者队列（MPMC、SPMC）包含防止活锁的阈值机制。MPSC 也实现 `Drainer`，但仅作为优雅关闭信号（出队不跳过阈值检查）。在生产者先于消费者结束的优雅关闭场景中，使用 `Drainer` 接口：
+基于 FAA 的泛型 MPMC 队列和 SPMC 队列使用出队阈值。生产结束后，`Drain` 会禁用该阈值。`MPMCIndirect` 和 `MPMCPtr` 中已发布的值始终可以取出。
 
 ```go
 // 生产者协程结束
@@ -332,7 +332,6 @@ if d, ok := q.(lfq.Drainer); ok {
 }
 
 // 消费者现在可以消耗所有剩余项目。
-// 对于 MPMC/SPMC，Drain 可避免阈值导致的提前返回。
 for {
     item, err := q.Dequeue()
     if err != nil {
@@ -342,7 +341,7 @@ for {
 }
 ```
 
-`Drain()` 是一个提示 — 调用者必须确保之后不再调用 `Enqueue()`。对于 MPMC/SPMC，`Drain()` 可避免 `Dequeue` 的阈值提前返回；对于 MPSC，`Drain()` 仅是关闭信号。SPSC 队列不实现 `Drainer`；类型断言会自然处理这种情况。
+`Drain()` 是一个提示 — 调用者必须确保之后不再调用 `Enqueue()`。对于使用出队阈值的队列，`Drain()` 可避免 `Dequeue` 的阈值提前返回；对于 MPSC，`Drain()` 仅是关闭信号。SPSC 队列不实现 `Drainer`；类型断言会自然处理这种情况。
 
 ## 如何选择队列
 

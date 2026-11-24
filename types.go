@@ -171,10 +171,9 @@ type ConsumerPtr interface {
 // Call Drain after all producers have finished to allow consumers to
 // drain remaining items without threshold blocking.
 //
-// For multi-consumer queues (SPMC, MPMC), Drain causes Dequeue to skip
-// threshold checks. For single-consumer queues (MPSC), Drain is a
-// graceful shutdown signal — MPSC has no threshold mechanism, so the
-// effect is limited to signaling that no further enqueues will occur.
+// The FAA SPMC queues and generic FAA MPMC queue skip their dequeue
+// threshold after Drain. MPMCIndirect and MPMCPtr can always drain
+// published values.
 //
 // Example:
 //
@@ -185,9 +184,7 @@ type ConsumerPtr interface {
 //	// Consumers can now drain all remaining items
 type Drainer interface {
 	// Drain signals that no more enqueues will occur.
-	// After Drain is called, multi-consumer Dequeue skips threshold
-	// checks, allowing consumers to drain all remaining items without
-	// producer pressure. For MPSC, Drain serves as a shutdown signal.
+	// Consumers may continue dequeuing until the queue is empty.
 	//
 	// Drain is a hint — the caller must ensure no further Enqueue calls
 	// will be made after calling Drain.

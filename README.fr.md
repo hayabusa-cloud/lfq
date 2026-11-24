@@ -18,7 +18,7 @@ Le paquet `lfq` fournit des files d'attente FIFO bornées sans verrou (lock-free
 `lfq` s'appuie sur la recherche fondamentale en concurrence pour surmonter les limites des mutex traditionnels et des boucles CAS (Compare-And-Swap) :
 
 - **Tampon Circulaire de Lamport (1977)** : Alimente nos chemins SPSC (Single-Producer/Single-Consumer), offrant une latence strictement $O(1)$ sans attente, sans instructions atomiques de lecture-modification-écriture coûteuses.
-- **Scalable Circular Queue (SCQ, 2019)** : Nos chemins multipartites (MPSC, SPMC, MPMC) sont implémentés sur la base de l'algorithme SCQ de Ruslan Nikolaev. En utilisant des instructions matérielles Fetch-And-Add (FAA) au lieu de boucles CAS, `lfq` évite de manière inhérente les goulots d'étranglement par contention et les problèmes ABA, fonctionnant comme une file d'attente autonome sans mécanismes externes de récupération sécurisée de mémoire (ex. hazard pointers).
+- **Scalable Circular Queue (SCQ, 2019)**. Les files FAA génériques reposent sur l’algorithme SCQ de Ruslan Nikolaev.
 
 ### Les Stacks d'I/O Non Bloquantes d'`iox`
 
@@ -107,7 +107,7 @@ elem, err := q.Dequeue()  // Sans attente O(1)
 
 ### MPSC/SPMC/MPMC: Basé sur FAA (Par Défaut)
 
-Par défaut, les files à accès multiple implémentent l'algorithme SCQ (File Circulaire Évolutive) en utilisant des instructions FAA (Fetch-And-Add). FAA incrémente aveuglément les compteurs de position, nécessitant 2n emplacements physiques pour une capacité n, mais offre une meilleure évolutivité sous haute contention que les alternatives basées sur CAS.
+Les files à accès multiple par défaut réservent des positions par fetch-and-add (FAA) dans un anneau de `2n` emplacements. Dans `MPMCIndirect` et `MPMCPtr`, les participants publient et retirent les valeurs à des positions consécutives. Si le participant qui a réservé la prochaine position est suspendu, un autre peut l’utiliser.
 
 - **Compromis** : Nécessite `2n` emplacements physiques pour une capacité nominale `n`.
 - **Capacité transitoire** : Avec `P` producteurs concurrents, jusqu'à `P-1` éléments supplémentaires peuvent être temporairement enfilés au-delà de `Cap()` avant l'application de la contre-pression.
@@ -129,10 +129,10 @@ La validation d'emplacements basée sur les cycles fournit la sécurité ABA san
 
 Les variantes de file Indirect et Ptr (toutes les variantes non SPSC, sauf Compact Indirect) empaquettent le numéro de séquence et la charge utile dans une seule opération atomique de 128 bits. Cela réduit la contention de ligne de cache et améliore le débit sous haute concurrence.
 
-Pour les variantes Ptr qui encodent des pointeurs dans des emplacements 128 bits (variantes FAA et PtrSeq), conservez une référence Go typée vers les objets enfilés jusqu'à leur défilement (ou jusqu'à consommation garantie). Ne vous appuyez pas uniquement sur les bits de pointeur stockés dans la file comme racine d'accessibilité du GC.
+Pour les variantes Ptr qui encodent les pointeurs dans des emplacements de 128 bits (FAA et PtrSeq), conservez une référence typée à chaque objet Go et gardez son adresse stable jusqu’à sa prise en charge par le consommateur.
 
 ```go
-// Indirect - une opération atomique de 128 bits par opération
+// Indirect stocke la séquence et la valeur dans une paire atomique.
 q := lfq.NewMPMCIndirect(4096)
 
 // Ptr - même optimisation pour unsafe.Pointer
@@ -320,7 +320,7 @@ return false
 
 ### Arrêt Gracieux
 
-Les files FAA à consommateurs multiples (MPMC, SPMC) incluent un mécanisme de seuil pour prévenir le livelock. MPSC implémente aussi `Drainer`, mais uniquement comme signal d'arrêt gracieux (pas de saut de seuil dans `Dequeue`). Pour un arrêt gracieux où les producteurs terminent avant les consommateurs, utilisez l'interface `Drainer` :
+Les files MPMC génériques et SPMC basées sur FAA utilisent un seuil de retrait. `Drain` désactive ce seuil à la fin de la production. Les valeurs publiées dans `MPMCIndirect` et `MPMCPtr` peuvent toujours être retirées.
 
 ```go
 // Les goroutines productrices terminent
@@ -332,7 +332,6 @@ if d, ok := q.(lfq.Drainer); ok {
 }
 
 // Les consommateurs peuvent maintenant drainer tous les éléments restants.
-// Pour MPMC/SPMC, Drain évite les sorties anticipées dues au seuil.
 for {
     item, err := q.Dequeue()
     if err != nil {
@@ -342,7 +341,7 @@ for {
 }
 ```
 
-`Drain()` est un indice — l'appelant doit s'assurer qu'aucun autre appel à `Enqueue()` ne sera fait. Pour MPMC/SPMC, `Drain()` évite les sorties anticipées dues au seuil dans `Dequeue`. Pour MPSC, `Drain()` est uniquement un signal d'arrêt. Les files SPSC n'implémentent pas `Drainer` ; l'assertion de type gère ce cas naturellement.
+`Drain()` est un indice — l'appelant doit s'assurer qu'aucun autre appel à `Enqueue()` ne sera fait. Pour les files dotées d’un seuil de retrait, `Drain()` évite les sorties anticipées dues au seuil dans `Dequeue`. Pour MPSC, `Drain()` est uniquement un signal d'arrêt. Les files SPSC n'implémentent pas `Drainer` ; l'assertion de type gère ce cas naturellement.
 
 ## Quand Utiliser Quelle File
 

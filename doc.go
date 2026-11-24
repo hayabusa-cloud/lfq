@@ -307,9 +307,8 @@
 //
 // # Graceful Shutdown
 //
-// FAA-based queues (MPMC, SPMC, MPSC) include a threshold mechanism to prevent
-// livelock. This mechanism may cause Dequeue to return [ErrWouldBlock] even when
-// items remain, waiting for producer activity to reset the threshold.
+// The generic FAA MPMC queue and the FAA SPMC queues use a dequeue threshold.
+// MPMCIndirect and MPMCPtr can always drain published values.
 //
 // For graceful shutdown scenarios where producers have finished but consumers
 // need to drain remaining items, use the [Drainer] interface:
@@ -325,9 +324,8 @@
 //	// Consumers can now drain all remaining items
 //	// without threshold blocking
 //
-// After Drain is called, Dequeue skips threshold checks, allowing consumers
-// to fully drain the queue. Drain is a hint — the caller must ensure no
-// further Enqueue calls will be made.
+// Drain disables the dequeue threshold on queues that use one. The caller
+// must ensure no further Enqueue calls will be made.
 //
 // SPSC queues do not implement [Drainer] as they have no threshold mechanism.
 // The type assertion naturally handles this case.

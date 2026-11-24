@@ -18,7 +18,7 @@ Package `lfq` provides lock-free and wait-free bounded FIFO queues optimized for
 `lfq` builds on foundational concurrency research to overcome the limitations of traditional mutexes and CAS (Compare-And-Swap) loops:
 
 - **Lamport Ring Buffer (1977)**: Powers our Single-Producer/Single-Consumer (SPSC) paths, offering strictly $O(1)$ wait-free latency without expensive atomic read-modify-write instructions.
-- **Scalable Circular Queue (SCQ, 2019)**: Our multi-party (MPSC, SPMC, MPMC) paths are implemented based on Ruslan Nikolaev's SCQ algorithm. By utilizing hardware Fetch-And-Add (FAA) instructions instead of CAS loops, `lfq` inherently avoids contention bottlenecks and ABA problems, operating as a standalone queue without external safe memory reclamation (e.g., hazard pointers).
+- **Scalable Circular Queue (SCQ, 2019)**. Ruslan Nikolaev’s SCQ is the basis for the generic FAA queues.
 
 ### The `iox` Non-Blocking I/O Stacks
 
@@ -107,7 +107,7 @@ elem, err := q.Dequeue()  // Wait-free O(1)
 
 ### MPSC/SPMC/MPMC: FAA-Based (Default)
 
-By default, multi-access queues implement the SCQ (Scalable Circular Queue) algorithm using FAA (Fetch-And-Add) instructions. FAA blindly increments position counters, requiring 2n physical slots for capacity n, but scales better under high contention than CAS-based alternatives.
+Default multi-access queues use fetch-and-add (FAA) to claim positions in a ring of `2n` slots. In `MPMCIndirect` and `MPMCPtr`, workers publish and remove values at consecutive slot positions. Another worker can use the next position if a claimant pauses.
 
 - **Trade-off**: Requires `2n` physical slots for nominal capacity `n`.
 - **Transient Capacity**: With `P` concurrent producers, up to `P-1` additional items may be transiently enqueued beyond `Cap()` before backpressure applies.
@@ -129,10 +129,10 @@ Cycle-based slot validation provides ABA safety without epoch counters or hazard
 
 Indirect and Ptr queue variants (all non-SPSC variants except Compact Indirect) pack sequence number and payload into a single 128-bit atomic. This reduces cache line contention and improves throughput under high concurrency.
 
-For Ptr variants that encode pointers into 128-bit slots (FAA and PtrSeq variants), keep a typed Go reference to enqueued objects until they are dequeued (or otherwise guaranteed consumed). Do not rely on queued pointer bits alone as a GC reachability root.
+For Ptr variants that encode pointers in 128-bit slots (FAA and PtrSeq), keep a typed reference to each Go object at a stable address until its consumer takes ownership.
 
 ```go
-// Indirect - single 128-bit atomic per operation
+// Indirect stores the sequence and value in one atomic pair.
 q := lfq.NewMPMCIndirect(4096)
 
 // Ptr - same optimization for unsafe.Pointer
@@ -320,7 +320,7 @@ return false
 
 ### Graceful Shutdown
 
-FAA-based multi-consumer queues (MPMC, SPMC) include a threshold mechanism to prevent livelock. MPSC also implements `Drainer`, but as a graceful-shutdown signal only (no dequeue threshold skip). For graceful shutdown where producers finish before consumers, use the `Drainer` interface:
+The generic FAA MPMC and FAA SPMC queues use a dequeue threshold. `Drain` disables that threshold after production ends. `MPMCIndirect` and `MPMCPtr` can always drain their published values.
 
 ```go
 // Producer goroutines finish
@@ -332,7 +332,6 @@ if d, ok := q.(lfq.Drainer); ok {
 }
 
 // Consumers can now drain all remaining items.
-// For MPMC/SPMC, Drain avoids threshold-based early exit.
 for {
     item, err := q.Dequeue()
     if err != nil {
@@ -342,7 +341,7 @@ for {
 }
 ```
 
-`Drain()` is a hint — the caller must ensure no further `Enqueue()` calls will be made. For MPMC/SPMC, `Drain()` avoids threshold-based early exit in `Dequeue`. For MPSC, `Drain()` is a shutdown signal only. SPSC queues do not implement `Drainer`; the type assertion naturally handles this case.
+`Drain()` is a hint — the caller must ensure no further `Enqueue()` calls will be made. For queues with a dequeue threshold, `Drain()` avoids threshold-based early exit in `Dequeue`. For MPSC, `Drain()` is a shutdown signal only. SPSC queues do not implement `Drainer`; the type assertion naturally handles this case.
 
 ## When to Use Which Queue
 

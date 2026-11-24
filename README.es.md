@@ -18,7 +18,7 @@ El paquete `lfq` proporciona colas FIFO limitadas libres de bloqueos (lock-free)
 `lfq` se basa en investigaciones fundamentales de concurrencia para superar las limitaciones de los mutex tradicionales y los bucles CAS (Compare-And-Swap):
 
 - **Buffer Circular de Lamport (1977)**: Impulsa nuestras rutas de Productor Único/Consumidor Único (SPSC), ofreciendo una latencia estrictamente de $O(1)$ libre de esperas sin costosas instrucciones atómicas de lectura-modificación-escritura.
-- **Scalable Circular Queue (SCQ, 2019)**: Nuestras rutas multipartitas (MPSC, SPMC, MPMC) están implementadas basándose en el algoritmo SCQ de Ruslan Nikolaev. Al utilizar instrucciones de hardware Fetch-And-Add (FAA) en lugar de bucles CAS, `lfq` evita inherentemente los cuellos de botella por contención y los problemas ABA, operando como una cola independiente sin mecanismos externos de recuperación segura de memoria (ej. hazard pointers).
+- **Scalable Circular Queue (SCQ, 2019)**. El algoritmo SCQ de Ruslan Nikolaev es la base de las colas FAA genéricas.
 
 ### Los Stacks de I/O No Bloqueantes de `iox`
 
@@ -107,7 +107,7 @@ elem, err := q.Dequeue()  // Sin espera O(1)
 
 ### MPSC/SPMC/MPMC: Basado en FAA (Predeterminado)
 
-Por defecto, las colas de acceso múltiple implementan el algoritmo SCQ (Cola Circular Escalable) utilizando instrucciones FAA (Fetch-And-Add). FAA incrementa ciegamente los contadores de posición, requiriendo 2n slots físicos para capacidad n, pero escala mejor bajo alta contención que las alternativas basadas en CAS.
+Las colas de acceso múltiple predeterminadas reservan posiciones mediante fetch-and-add (FAA) en un anillo de `2n` ranuras. En `MPMCIndirect` y `MPMCPtr`, los participantes publican y retiran los valores en posiciones consecutivas. Si quien reservó la siguiente posición se detiene, otro participante puede utilizarla.
 
 - **Compensación**: Requiere `2n` slots físicos para una capacidad nominal `n`.
 - **Capacidad transitoria**: Con `P` productores concurrentes, hasta `P-1` elementos adicionales pueden encolarse transitoriamente por encima de `Cap()` antes de que aplique la contrapresión.
@@ -129,10 +129,10 @@ La validación de slots basada en ciclos proporciona seguridad ABA sin contadore
 
 Las variantes de cola Indirect y Ptr (todas las variantes no SPSC excepto Compact Indirect) empaquetan el número de secuencia y la carga útil en una sola operación atómica de 128 bits. Esto reduce la contención de línea de caché y mejora el rendimiento bajo alta concurrencia.
 
-Para las variantes Ptr que codifican punteros en slots de 128 bits (variantes FAA y PtrSeq), mantén una referencia Go tipada a los objetos encolados hasta que se desencolen (o se garantice su consumo). No dependas solo de los bits de puntero almacenados en la cola como raíz de alcanzabilidad del GC.
+Para las variantes Ptr que codifican punteros en ranuras de 128 bits (FAA y PtrSeq), conserva una referencia tipada a cada objeto Go y mantén estable su dirección hasta que el consumidor asuma su propiedad.
 
 ```go
-// Indirect - una operación atómica de 128 bits por operación
+// Indirect guarda la secuencia y el valor en un par atómico.
 q := lfq.NewMPMCIndirect(4096)
 
 // Ptr - misma optimización para unsafe.Pointer
@@ -320,7 +320,7 @@ return false
 
 ### Apagado Elegante
 
-Las colas FAA con múltiples consumidores (MPMC, SPMC) incluyen un mecanismo de umbral para prevenir livelock. MPSC también implementa `Drainer`, pero solo como señal de apagado elegante (sin salto de umbral en `Dequeue`). Para un apagado elegante donde los productores terminan antes que los consumidores, usa la interfaz `Drainer`:
+Las colas MPMC genéricas y SPMC basadas en FAA usan un umbral de extracción. `Drain` desactiva ese umbral cuando termina la producción. `MPMCIndirect` y `MPMCPtr` permiten extraer todos los valores publicados en cualquier momento.
 
 ```go
 // Las goroutines productoras terminan
@@ -332,7 +332,6 @@ if d, ok := q.(lfq.Drainer); ok {
 }
 
 // Los consumidores ahora pueden drenar todos los elementos restantes.
-// Para MPMC/SPMC, Drain evita la salida temprana por umbral.
 for {
     item, err := q.Dequeue()
     if err != nil {
@@ -342,7 +341,7 @@ for {
 }
 ```
 
-`Drain()` es una pista — el llamador debe asegurar que no se harán más llamadas a `Enqueue()`. Para MPMC/SPMC, `Drain()` evita la salida temprana por umbral en `Dequeue`. Para MPSC, `Drain()` es solo una señal de apagado. Las colas SPSC no implementan `Drainer`; la aserción de tipo maneja este caso naturalmente.
+`Drain()` es una pista — el llamador debe asegurar que no se harán más llamadas a `Enqueue()`. En las colas con un umbral de extracción, `Drain()` evita la salida temprana por umbral en `Dequeue`. Para MPSC, `Drain()` es solo una señal de apagado. Las colas SPSC no implementan `Drainer`; la aserción de tipo maneja este caso naturalmente.
 
 ## Cuándo Usar Cada Cola
 
