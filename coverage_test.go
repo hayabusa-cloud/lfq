@@ -1064,7 +1064,7 @@ func TestMPSCHighContention(t *testing.T) {
 	const itemsPerProducer = 200
 
 	var wg sync.WaitGroup
-	var produced atomix.Int64
+	var consumed int
 
 	// Many producers competing for few slots
 	wg.Add(numProducers)
@@ -1087,22 +1087,26 @@ func TestMPSCHighContention(t *testing.T) {
 	}
 
 	// Single consumer draining
-	done := make(chan struct{})
+	stopConsumer := make(chan struct{})
+	consumerDone := make(chan struct{})
 	go func() {
+		defer close(consumerDone)
 		for {
 			select {
-			case <-done:
+			case <-stopConsumer:
 				return
 			default:
 				_, err := q.Dequeue()
 				if err == nil {
-					produced.Add(1)
+					consumed++
 				}
 			}
 		}
 	}()
 
 	wg.Wait()
+	close(stopConsumer)
+	<-consumerDone
 
 	// Drain remaining
 	for {
@@ -1111,14 +1115,12 @@ func TestMPSCHighContention(t *testing.T) {
 			break
 		}
 		if err == nil {
-			produced.Add(1)
+			consumed++
 		}
 	}
-	close(done)
 
-	expected := int64(numProducers * itemsPerProducer)
-	if produced.Load() != expected {
-		t.Fatalf("produced: got %d, want %d", produced.Load(), expected)
+	if want := numProducers * itemsPerProducer; consumed != want {
+		t.Fatalf("consumed: got %d, want %d", consumed, want)
 	}
 }
 
