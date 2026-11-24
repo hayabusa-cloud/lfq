@@ -419,12 +419,14 @@ func TestHighContentionDequeue(t *testing.T) {
 		done := make(chan struct{})
 		go func() {
 			backoff := iox.Backoff{}
+			next := uintptr(1)
 			for {
 				select {
 				case <-done:
 					return
 				default:
-					if q.Enqueue(1) == nil {
+					if q.Enqueue(next) == nil {
+						next++
 						backoff.Reset()
 					} else {
 						backoff.Wait()
