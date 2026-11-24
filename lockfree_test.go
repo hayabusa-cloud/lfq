@@ -136,206 +136,131 @@ func testContendedEnqueue[T any](
 	}
 }
 
-// TestHighContentionDequeue consolidates all dequeue-side high contention tests.
-// Tests SPMC variants with 32 consumers competing for limited items.
+// TestHighContentionDequeue exercises four-slot SPMC queues with 32 concurrent consumers.
 func TestHighContentionDequeue(t *testing.T) {
 	if lfq.RaceEnabled {
 		t.Skip("skip: lock-free algorithm uses cross-variable memory ordering")
 	}
-	// SPMC
-	t.Run("SPMC", func(t *testing.T) {
-		q := lfq.NewSPMC[int](4)
-		var wg sync.WaitGroup
-		var dequeued, blocked atomix.Int64
+	const capacity, items = 4, 1024
+	values := make([]int, items)
+	words := make([]uintptr, items)
+	for i := range values {
+		values[i] = i + 1
+		words[i] = uintptr(i + 1)
+	}
 
-		done := make(chan struct{})
-		go func() {
-			backoff := iox.Backoff{}
-			for {
-				select {
-				case <-done:
-					return
-				default:
-					v := 1
-					if q.Enqueue(&v) == nil {
-						backoff.Reset()
-					} else {
-						backoff.Wait()
-					}
-				}
-			}
-		}()
-
-		for range 32 {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for range 1000 {
-					if _, err := q.Dequeue(); err == nil {
-						dequeued.Add(1)
-					} else {
-						blocked.Add(1)
-					}
-				}
-			}()
-		}
-
-		wg.Wait()
-		close(done)
-
-		if dequeued.Load() == 0 {
-			t.Error("expected some successful dequeues")
-		}
-		if blocked.Load() == 0 {
-			t.Error("expected some blocked dequeues (queue empty)")
-		}
+	t.Run("SPMCSeq", func(t *testing.T) {
+		q := lfq.NewSPMCSeq[int](capacity)
+		testContendedDequeue(t, values, func(v int) error { return q.Enqueue(&v) }, q.Dequeue)
 	})
-
-	// SPMCIndirect
-	t.Run("SPMCIndirect", func(t *testing.T) {
-		q := lfq.NewSPMCIndirect(4)
-		var wg sync.WaitGroup
-		var dequeued, blocked atomix.Int64
-
-		done := make(chan struct{})
-		go func() {
-			backoff := iox.Backoff{}
-			for {
-				select {
-				case <-done:
-					return
-				default:
-					if q.Enqueue(1) == nil {
-						backoff.Reset()
-					} else {
-						backoff.Wait()
-					}
-				}
-			}
-		}()
-
-		for range 32 {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for range 1000 {
-					if _, err := q.Dequeue(); err == nil {
-						dequeued.Add(1)
-					} else {
-						blocked.Add(1)
-					}
-				}
-			}()
-		}
-
-		wg.Wait()
-		close(done)
-
-		if dequeued.Load() == 0 {
-			t.Error("expected some successful dequeues")
-		}
-		if blocked.Load() == 0 {
-			t.Error("expected some blocked dequeues (queue empty)")
-		}
+	t.Run("SPMCIndirectSeq", func(t *testing.T) {
+		q := lfq.NewSPMCIndirectSeq(capacity)
+		testContendedDequeue(t, words, q.Enqueue, q.Dequeue)
 	})
-
-	// SPMCPtr
-	t.Run("SPMCPtr", func(t *testing.T) {
-		q := lfq.NewSPMCPtr(4)
-		var wg sync.WaitGroup
-		var dequeued, blocked atomix.Int64
-
-		done := make(chan struct{})
-		go func() {
-			backoff := iox.Backoff{}
-			for {
-				select {
-				case <-done:
-					return
-				default:
-					if q.Enqueue(unsafe.Pointer(new(int))) == nil {
-						backoff.Reset()
-					} else {
-						backoff.Wait()
-					}
-				}
-			}
-		}()
-
-		for range 32 {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for range 1000 {
-					if _, err := q.Dequeue(); err == nil {
-						dequeued.Add(1)
-					} else {
-						blocked.Add(1)
-					}
-				}
-			}()
+	t.Run("SPMCPtrSeq", func(t *testing.T) {
+		q := lfq.NewSPMCPtrSeq(capacity)
+		var pin runtime.Pinner
+		pin.Pin(&values[0])
+		defer pin.Unpin()
+		ptrs := make([]unsafe.Pointer, len(values))
+		for i := range values {
+			ptrs[i] = unsafe.Pointer(&values[i])
 		}
-
-		wg.Wait()
-		close(done)
-
-		if dequeued.Load() == 0 {
-			t.Error("expected some successful dequeues")
-		}
-		if blocked.Load() == 0 {
-			t.Error("expected some blocked dequeues (queue empty)")
-		}
+		testContendedDequeue(t, ptrs, q.Enqueue, q.Dequeue)
 	})
-
-	// SPMCCompact
 	t.Run("SPMCCompact", func(t *testing.T) {
-		q := lfq.NewSPMCCompactIndirect(4)
-		var wg sync.WaitGroup
-		var dequeued, blocked atomix.Int64
+		q := lfq.NewSPMCCompactIndirect(capacity)
+		testContendedDequeue(t, words, q.Enqueue, q.Dequeue)
+	})
+}
 
-		done := make(chan struct{})
-		go func() {
-			backoff := iox.Backoff{}
-			next := uintptr(1)
-			for {
-				select {
-				case <-done:
-					return
-				default:
-					if q.Enqueue(next) == nil {
-						next++
-						backoff.Reset()
-					} else {
-						backoff.Wait()
-					}
+func testContendedDequeue[T comparable](
+	t *testing.T, values []T, enqueue func(T) error, dequeue func() (T, error),
+) {
+	t.Helper()
+	const consumers, attempts = 32, 1000
+
+	// Seed the queue before the consumers start. At most len(values) of their
+	// attempts can succeed, even if the producer runs ahead.
+	if err := enqueue(values[0]); err != nil {
+		t.Fatalf("first Enqueue returned %v", err)
+	}
+	var received [consumers][]T
+	var wg sync.WaitGroup
+	for c := range received {
+		wg.Go(func() {
+			var batch []T
+			for range attempts {
+				v, err := dequeue()
+				if err == nil {
+					batch = append(batch, v)
+				} else if err != lfq.ErrWouldBlock {
+					t.Errorf("Dequeue returned %v", err)
+					break
 				}
 			}
-		}()
-
-		for range 32 {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for range 1000 {
-					if _, err := q.Dequeue(); err == nil {
-						dequeued.Add(1)
-					} else {
-						blocked.Add(1)
-					}
-				}
-			}()
-		}
-
+			received[c] = batch
+		})
+	}
+	done := make(chan struct{})
+	go func() {
 		wg.Wait()
 		close(done)
+	}()
 
-		if dequeued.Load() == 0 {
-			t.Error("expected some successful dequeues")
+	published := 1
+	var backoff iox.Backoff
+produce:
+	for published < len(values) {
+		select {
+		case <-done:
+			break produce
+		default:
 		}
-		if blocked.Load() == 0 {
-			t.Error("expected some blocked dequeues (queue empty)")
+		if err := enqueue(values[published]); err == nil {
+			published++
+			backoff.Reset()
+		} else if err == lfq.ErrWouldBlock {
+			backoff.Wait()
+		} else {
+			t.Errorf("Enqueue returned %v", err)
+			break
 		}
-	})
+	}
+	<-done
+
+	reader := make(map[T]int, published)
+	for c, batch := range received {
+		for _, v := range batch {
+			if _, exists := reader[v]; exists {
+				t.Fatalf("duplicate dequeue of %v", v)
+			}
+			reader[v] = c
+		}
+	}
+	n := len(reader)
+	if n == 0 || n > published {
+		t.Fatalf("consumers received %d distinct values from %d enqueues", n, published)
+	}
+	// Each consumer's calls are ordered. Calls from different consumers may overlap.
+	for _, want := range values[:n] {
+		c, ok := reader[want]
+		if !ok {
+			t.Fatalf("consumers missed %v in the first %d published values", want, n)
+		}
+		if got := received[c][0]; got != want {
+			t.Fatalf("consumer %d received %v before %v", c, got, want)
+		}
+		received[c] = received[c][1:]
+	}
+	for _, want := range values[n:published] {
+		if got, err := dequeue(); err != nil || got != want {
+			t.Fatalf("Dequeue after consumers finished returned (%v, %v), want %v", got, err, want)
+		}
+	}
+	if v, err := dequeue(); err != lfq.ErrWouldBlock {
+		t.Fatalf("Dequeue after the last item returned (%v, %v), want ErrWouldBlock", v, err)
+	}
 }
 
 // =============================================================================
