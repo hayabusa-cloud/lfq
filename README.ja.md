@@ -45,7 +45,7 @@ go get code.hybscloud.com/lfq
 
 ### コンパイラ要件
 
-より高いパフォーマンスを得るには、[内部関数最適化 Go コンパイラ](https://github.com/hayabusa-cloud/go)でコンパイルしてください：
+本番向けのビルドとベンチマークには Atomix Go コンパイラを使用します。[Atomix Go](https://github.com/hayabusa-cloud/go)
 
 ```bash
 # Makefile を使用（推奨）
@@ -57,7 +57,7 @@ make test               # 内部関数コンパイラでテスト
 make install-compiler-source
 ```
 
-どちらのインストールターゲットも、デフォルトでは Go 1.27.x 向けの最新の Atomix コンパイラを使用します。特定のリリースを選ぶには、環境変数 `COMPILER_TAG` を設定してください。リリースの検索には `jq` が必要です。ソースからビルドする場合は、公式の Go 1.27.x の最新版を `PATH` に設定してください。
+どちらのインストールターゲットも、デフォルトでは Go 1.27.x 向けの最新の Atomix コンパイラを使用します。特定のリリースを選ぶには、環境変数 `COMPILER_TAG` を設定してください。リリースの検索には `jq` を使用します。GitHub への認証には `GH_TOKEN` を指定できます。ソースからビルドする場合は、公式の Go 1.27.x の最新版を `PATH` に設定してください。
 
 手動でインストールする場合は、使用するプラットフォーム用のアーカイブをダウンロードし、同じリリースの `SHA256SUMS` で検証してください。展開した `go` ディレクトリを `$HOME/sdk/${COMPILER_TAG:-go1.27-atomix}` に配置します。[コンパイラのリリース一覧](https://github.com/hayabusa-cloud/go/releases)
 
@@ -67,11 +67,13 @@ compiler="$HOME/sdk/${COMPILER_TAG:-go1.27-atomix}"
 GOTOOLCHAIN=local GOROOT="$compiler" "$compiler/bin/go" build ./...
 ```
 
-内部関数コンパイラは atomix 操作を適切なメモリオーダリングでインライン化します。標準 Go コンパイラは基本的なテストには使用できますが、高競合下では問題が発生する可能性があります。
+Atomix コンパイラは `atomix` の操作をインライン化します。CI では標準の Go コンパイラで動作を検証します。
 
 ## ベンチマーク
 
-コンパイラをインストールして `make bench-session` を実行すると、`GOMAXPROCS=2` で各ベンチマークを 10 回測定します。`Handoff` は、`sess` が使う容量 4 の SPSC データキューと同じ容量の Go のバッファ付きチャネルで、それぞれ 2 つの goroutine 間で値を 1 個受け渡します。どちらも満杯または空のときは `iox.Backoff` で待機します。`ns/op` は待機時間を含み、`waits/op` は値 1 個を渡す間に送受信側が待機した回数の合計です。
+CI では Linux の amd64 と arm64 の各マシンで `make bench-session` を実行します。Atomix コンパイラで同じターゲットを実行すると、`GOMAXPROCS=2` で各ベンチマークを 10 回測定できます。
+
+`Handoff` は、`sess` が使う容量 4 の SPSC データキューと同じ容量の Go のバッファ付きチャネルで、それぞれ 2 つの goroutine 間で値を 1 個受け渡します。どちらも満杯または空のときは `iox.Backoff` で待機します。`ns/op` は待機時間を含み、`waits/op` は値 1 個を渡す間に送受信側が待機した回数の合計です。
 
 `FullRetry` は、満杯のキューへの挿入が失敗し、値を 1 個取り出してから挿入に成功するまでを単一の goroutine で測定します。すべてのベンチマークを実行するには `make bench` を使います。
 
@@ -402,13 +404,7 @@ type MPMC[T any] struct {
 
 ## 競合検出
 
-Go の競合検出器はロックフリーアルゴリズムの検証には設計されていません。明示的な同期プリミティブ（mutex、channel）を追跡しますが、アトミックメモリオーダリングによる happens-before 関係は観察できません。
-
-テストは2つの保護機構を使用：
-- ビルドタグ `//go:build !race` でサンプルファイルを競合テストから除外
-- ランタイムチェック `if lfq.RaceEnabled { t.Skip() }` で `lockfree_test.go` の並行テストをスキップ
-
-`go test -race ./...` で競合安全なテストを実行、`go test ./...` ですべてのテストを実行します。
+Go の競合検出器では、`atomix` がアセンブリで行う同期の一部を追跡できません。`go test -race ./...` で競合検出を有効にしたテストを実行します。`go test ./...` を実行すると、競合検出時に省かれる並行テストと使用例も検証できます。
 
 ## 依存関係
 
@@ -420,12 +416,10 @@ Go の競合検出器はロックフリーアルゴリズムの検証には設�
 
 | プラットフォーム | ステータス |
 |------------------|-----------|
-| linux/amd64 | プライマリ |
-| linux/arm64 | サポート |
-| linux/riscv64 | サポート |
-| linux/loong64 | サポート |
-| darwin/amd64, darwin/arm64 | サポート |
-| freebsd/amd64, freebsd/arm64 | サポート |
+| linux/amd64, linux/arm64 (LSE2) | Linux 6.18 以降での本番運用 |
+| linux/riscv64, linux/loong64 | CI でクロスコンパイル |
+| darwin/amd64, darwin/arm64 | 開発用。CI では darwin/arm64 でテストを実行。 |
+| freebsd/amd64, freebsd/arm64 | 開発用 |
 
 ## 参考文献
 

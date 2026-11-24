@@ -45,7 +45,7 @@ go get code.hybscloud.com/lfq
 
 ### Compiler Requirement
 
-For better performance, compile with the [intrinsics-optimized Go compiler](https://github.com/hayabusa-cloud/go):
+Use the Atomix Go compiler for production builds and benchmarks. [Atomix Go](https://github.com/hayabusa-cloud/go)
 
 ```bash
 # Using Makefile (recommended)
@@ -57,7 +57,7 @@ make test               # Test with intrinsics compiler
 make install-compiler-source
 ```
 
-Both install targets default to the latest published Go 1.27.x Atomix compiler. Export `COMPILER_TAG` to select a specific release. Release discovery requires `jq`. Source builds use the latest stock Go 1.27.x on `PATH`.
+Both install targets default to the latest published Go 1.27.x Atomix compiler. Export `COMPILER_TAG` to select a specific release. Release discovery uses `jq` and can authenticate to GitHub with `GH_TOKEN`. Source builds use the latest stock Go 1.27.x on `PATH`.
 
 For manual installation, download the archive for your platform and verify it against `SHA256SUMS` from the same release. Place the extracted `go` directory at `$HOME/sdk/${COMPILER_TAG:-go1.27-atomix}`. [Compiler releases](https://github.com/hayabusa-cloud/go/releases)
 
@@ -67,11 +67,13 @@ compiler="$HOME/sdk/${COMPILER_TAG:-go1.27-atomix}"
 GOTOOLCHAIN=local GOROOT="$compiler" "$compiler/bin/go" build ./...
 ```
 
-The intrinsics compiler inlines `atomix` operations with proper memory ordering. The standard Go compiler works for basic testing but may exhibit issues under high contention.
+The Atomix compiler inlines `atomix` operations. CI runs correctness tests with standard Go.
 
 ## Benchmarks
 
-After installing the compiler, run `make bench-session` for ten samples with `GOMAXPROCS=2`. `Handoff` transfers one value between two goroutines through the four-slot SPSC data queue used by `sess` or a buffered Go channel of the same capacity. Both use `iox.Backoff` on a full or empty queue. `ns/op` includes that wait time, and `waits/op` counts waits on both sides per delivered value.
+CI runs `make bench-session` on native Linux amd64 and arm64. Run the same target with the Atomix compiler to collect ten samples with `GOMAXPROCS=2`.
+
+`Handoff` transfers one value between two goroutines through the four-slot SPSC data queue used by `sess` or a buffered Go channel of the same capacity. Both use `iox.Backoff` on a full or empty queue. `ns/op` includes that wait time, and `waits/op` counts waits on both sides per delivered value.
 
 `FullRetry` measures a failed enqueue on a full queue, one dequeue, and a successful retry in a single goroutine. Run `make bench` for the full benchmark suite.
 
@@ -402,13 +404,7 @@ type MPMC[T any] struct {
 
 ## Race Detection
 
-Go's race detector is not designed for lock-free algorithm verification. It tracks explicit sync primitives (mutex, channels) but cannot observe happens-before relationships from atomic memory orderings.
-
-Tests use two protection mechanisms:
-- Build tag `//go:build !race` excludes example files from race testing
-- Runtime check `if lfq.RaceEnabled { t.Skip() }` skips concurrent tests in `lockfree_test.go`
-
-Run `go test -race ./...` for race-safe tests, or `go test ./...` for all tests.
+Go’s race detector cannot observe all synchronization in `atomix` assembly. Run `go test -race ./...` for the instrumented tests. Run `go test ./...` to include the concurrent tests and examples skipped in race builds.
 
 ## Dependencies
 
@@ -420,12 +416,10 @@ Run `go test -race ./...` for race-safe tests, or `go test ./...` for all tests.
 
 | Platform | Status |
 |----------|--------|
-| linux/amd64 | Primary |
-| linux/arm64 | Supported |
-| linux/riscv64 | Supported |
-| linux/loong64 | Supported |
-| darwin/amd64, darwin/arm64 | Supported |
-| freebsd/amd64, freebsd/arm64 | Supported |
+| linux/amd64, linux/arm64 (LSE2) | Production on Linux 6.18+ |
+| linux/riscv64, linux/loong64 | Cross-built in CI |
+| darwin/amd64, darwin/arm64 | Development. CI tests darwin/arm64. |
+| freebsd/amd64, freebsd/arm64 | Development |
 
 ## References
 

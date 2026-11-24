@@ -4,6 +4,9 @@
 
 // Package lfq provides bounded FIFO queue implementations.
 //
+// The primary targets are native Linux 6.18 or later on amd64 and on arm64
+// with LSE2. Production builds and benchmarks use the Atomix Go compiler.
+//
 // The package offers multiple queue variants optimized for different
 // producer/consumer patterns:
 //
@@ -332,22 +335,11 @@
 //
 // # Race Detection
 //
-// Go's race detector is not designed for lock-free algorithm verification.
-// The race detector tracks explicit synchronization primitives (mutex, channels,
-// WaitGroup) but cannot observe happens-before relationships established through
-// atomic memory orderings (acquire-release semantics).
-//
-// Lock-free queues use sequence numbers with acquire-release semantics to
-// protect non-atomic data fields. These algorithms are correct, but the race
-// detector may report false positives because it cannot track synchronization
-// provided by atomic operations on separate variables.
-//
-// For lock-free algorithm correctness verification, use:
-//   - Formal verification tools (TLA+, SPIN)
-//   - Stress testing without race detector
-//   - Memory model analysis
-//
-// Tests incompatible with race detection are excluded via //go:build !race.
+// Go's race detector cannot observe all synchronization in atomix assembly.
+// Run go test -race ./... for the instrumented tests. Run go test ./... to
+// include the concurrent tests that check [RaceEnabled] and the examples
+// excluded by the !race build constraint. Lock-free progress requires a
+// separate proof.
 //
 // # Dependencies
 //

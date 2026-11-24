@@ -18,15 +18,22 @@ bootstrap)
     printf '%s\n' "$root"
     ;;
 atomix)
+    curl_args=(-fsSL)
+    if [[ -n ${GH_TOKEN:-} && $2 == https://api.github.com/repos/hayabusa-cloud/go/releases ]]; then
+        curl_args+=(-H "Authorization: Bearer $GH_TOKEN")
+    fi
     # A Go patch can have several published recipes. Compare publication time on ties.
+    candidates=()
     for ((page=1; ; page++)); do
-        releases=$(curl -fsSL "$2?per_page=100&page=$page")
-        jq -c '.[] | select(.draft == false and .prerelease == false) |
+        releases=$(curl "${curl_args[@]}" "$2?per_page=100&page=$page")
+        page_candidates=$(jq -c '.[] | select(.draft == false and .prerelease == false) |
             .tag_name as $tag |
             ($tag | capture("^go1\\.27\\.(?<patch>[0-9]+)-atomix\\.[0-9a-f]{12}$")) as $v |
-            [($v.patch | tonumber), .published_at, .id, $tag]' <<< "$releases"
+            [($v.patch | tonumber), .published_at, .id, $tag]' <<< "$releases")
+        candidates+=("$page_candidates")
         if jq -e 'length < 100' <<< "$releases" >/dev/null; then break; fi
-    done | jq -ers 'max | .[3] // error("no published Go 1.27.x Atomix compiler")'
+    done
+    printf '%s\n' "${candidates[@]}" | jq -ers 'max | .[3] // error("no published Go 1.27.x Atomix compiler")'
     ;;
 *) exit 2 ;;
 esac

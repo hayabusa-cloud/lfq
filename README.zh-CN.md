@@ -45,7 +45,7 @@ go get code.hybscloud.com/lfq
 
 ### 编译器要求
 
-为获得更好的性能，请使用[内部函数优化 Go 编译器](https://github.com/hayabusa-cloud/go)编译：
+生产构建和基准测试使用 Atomix Go 编译器。[Atomix Go](https://github.com/hayabusa-cloud/go)
 
 ```bash
 # 使用 Makefile（推荐）
@@ -57,7 +57,7 @@ make test               # 使用内部函数编译器测试
 make install-compiler-source
 ```
 
-两个安装目标默认使用 Go 1.27.x 系列最新发布的 Atomix 编译器。要选择特定版本，请设置环境变量 `COMPILER_TAG`。查询版本需要 `jq`。从源码构建时，请在 `PATH` 中使用官方 Go 1.27.x 的最新版本。
+两个安装目标默认使用 Go 1.27.x 系列最新发布的 Atomix 编译器。要选择特定版本，请设置环境变量 `COMPILER_TAG`。查询版本使用 `jq`，可通过 `GH_TOKEN` 向 GitHub 验证身份。从源码构建时，请在 `PATH` 中使用官方 Go 1.27.x 的最新版本。
 
 手动安装时，请下载对应平台的归档文件，用同一版本的 `SHA256SUMS` 校验，然后将解压出的 `go` 目录放在 `$HOME/sdk/${COMPILER_TAG:-go1.27-atomix}`。[编译器发布页](https://github.com/hayabusa-cloud/go/releases)
 
@@ -67,11 +67,13 @@ compiler="$HOME/sdk/${COMPILER_TAG:-go1.27-atomix}"
 GOTOOLCHAIN=local GOROOT="$compiler" "$compiler/bin/go" build ./...
 ```
 
-内部函数编译器将 `atomix` 操作内联为正确内存顺序的指令。标准 Go 编译器可用于基本测试，但在高争用情况下可能出现问题。
+Atomix 编译器会内联 `atomix` 操作。CI 使用标准 Go 编译器运行正确性测试。
 
 ## 基准测试
 
-安装编译器后，运行 `make bench-session`，在 `GOMAXPROCS=2` 下采集十组样本。`Handoff` 在两个 goroutine 之间传递一个值，分别使用 `sess` 的四槽 SPSC 数据队列和相同容量的 Go 缓冲通道。两者在队列满或空时都使用 `iox.Backoff`。`ns/op` 包含等待时间，`waits/op` 表示每传递一个值时两端等待次数之和。
+CI 在原生 Linux amd64 和 arm64 环境中运行 `make bench-session`。使用 Atomix 编译器运行同一目标，即可在 `GOMAXPROCS=2` 下采集十组样本。
+
+`Handoff` 在两个 goroutine 之间传递一个值，分别使用 `sess` 的四槽 SPSC 数据队列和相同容量的 Go 缓冲通道。两者在队列满或空时都使用 `iox.Backoff`。`ns/op` 包含等待时间，`waits/op` 表示每传递一个值时两端等待次数之和。
 
 `FullRetry` 在单个 goroutine 中测量向已满队列入队失败、出队一个值并成功重试入队的过程。运行 `make bench` 可执行全部基准测试。
 
@@ -402,13 +404,7 @@ type MPMC[T any] struct {
 
 ## 竞态检测
 
-Go 的竞态检测器不适用于无锁算法验证。它跟踪显式同步原语（mutex、channel），但无法观察原子内存顺序建立的 happens-before 关系。
-
-测试使用两种保护机制：
-- 构建标签 `//go:build !race` 将示例文件排除在竞态测试之外
-- 运行时检查 `if lfq.RaceEnabled { t.Skip() }` 跳过 `lockfree_test.go` 中的并发测试
-
-运行 `go test -race ./...` 执行竞态安全测试，或运行 `go test ./...` 执行所有测试。
+Go 的竞态检测器无法观察 `atomix` 汇编实现中的所有同步操作。运行 `go test -race ./...` 可执行带竞态检测的测试。运行 `go test ./...` 还会执行竞态检测模式下跳过的并发测试和示例。
 
 ## 依赖
 
@@ -420,12 +416,10 @@ Go 的竞态检测器不适用于无锁算法验证。它跟踪显式同步原�
 
 | 平台 | 状态 |
 |------|------|
-| linux/amd64 | 主要 |
-| linux/arm64 | 支持 |
-| linux/riscv64 | 支持 |
-| linux/loong64 | 支持 |
-| darwin/amd64, darwin/arm64 | 支持 |
-| freebsd/amd64, freebsd/arm64 | 支持 |
+| linux/amd64, linux/arm64 (LSE2) | Linux 6.18 及以上版本的生产环境 |
+| linux/riscv64, linux/loong64 | CI 交叉编译 |
+| darwin/amd64, darwin/arm64 | 开发环境。CI 在 darwin/arm64 上运行测试。 |
+| freebsd/amd64, freebsd/arm64 | 开发环境 |
 
 ## 参考文献
 

@@ -45,7 +45,7 @@ go get code.hybscloud.com/lfq
 
 ### Exigence du Compilateur
 
-Pour de meilleures performances, compilez avec le [compilateur Go optimisé avec intrinsèques](https://github.com/hayabusa-cloud/go) :
+Utilisez le compilateur Atomix Go pour les compilations de production et les mesures de performances. [Atomix Go](https://github.com/hayabusa-cloud/go)
 
 ```bash
 # Utilisation du Makefile (recommandé)
@@ -57,7 +57,7 @@ make test               # Tester avec le compilateur d'intrinsèques
 make install-compiler-source
 ```
 
-Les deux cibles d’installation utilisent par défaut la dernière version publiée du compilateur Atomix pour Go 1.27.x. Exportez `COMPILER_TAG` pour sélectionner une version précise. La recherche des versions nécessite `jq`. Pour compiler depuis les sources, utilisez la dernière version officielle de Go 1.27.x dans le `PATH`.
+Les deux cibles d’installation utilisent par défaut la dernière version publiée du compilateur Atomix pour Go 1.27.x. Exportez `COMPILER_TAG` pour sélectionner une version précise. La recherche des versions utilise `jq` et accepte `GH_TOKEN` pour s’authentifier auprès de GitHub. Pour compiler depuis les sources, utilisez la dernière version officielle de Go 1.27.x dans le `PATH`.
 
 Pour une installation manuelle, téléchargez l’archive de votre plateforme et vérifiez-la à l’aide du fichier `SHA256SUMS` de la même version. Placez le répertoire `go` extrait dans `$HOME/sdk/${COMPILER_TAG:-go1.27-atomix}`. [Versions du compilateur](https://github.com/hayabusa-cloud/go/releases)
 
@@ -67,11 +67,13 @@ compiler="$HOME/sdk/${COMPILER_TAG:-go1.27-atomix}"
 GOTOOLCHAIN=local GOROOT="$compiler" "$compiler/bin/go" build ./...
 ```
 
-Le compilateur d'intrinsèques intègre les opérations atomix avec l'ordonnancement mémoire correct. Le compilateur Go standard fonctionne pour les tests de base mais peut présenter des problèmes sous haute contention.
+Le compilateur Atomix développe en ligne les opérations d’`atomix`. La CI exécute les tests de correction avec le compilateur Go standard.
 
 ## Mesures de performance
 
-Après avoir installé le compilateur, exécutez `make bench-session` pour obtenir dix échantillons avec `GOMAXPROCS=2`. `Handoff` transmet une valeur entre deux goroutines au moyen de la file de données SPSC à quatre places utilisée par `sess` ou d’un canal Go doté d’un tampon de même capacité. Les deux utilisent `iox.Backoff` quand la file est pleine ou vide. `ns/op` inclut le temps d’attente et `waits/op` compte les attentes des deux côtés pour chaque valeur transmise.
+La CI exécute `make bench-session` sous Linux, sur des machines amd64 et arm64 natives. Exécutez la même cible avec le compilateur Atomix pour obtenir dix échantillons avec `GOMAXPROCS=2`.
+
+`Handoff` transmet une valeur entre deux goroutines au moyen de la file de données SPSC à quatre places utilisée par `sess` ou d’un canal Go doté d’un tampon de même capacité. Les deux utilisent `iox.Backoff` quand la file est pleine ou vide. `ns/op` inclut le temps d’attente et `waits/op` compte les attentes des deux côtés pour chaque valeur transmise.
 
 `FullRetry` mesure dans une seule goroutine une tentative d’insertion dans une file pleine, le retrait d’une valeur et la réussite d’une nouvelle tentative d’insertion. Exécutez `make bench` pour lancer tous les benchmarks.
 
@@ -402,13 +404,7 @@ type MPMC[T any] struct {
 
 ## Détection de Conditions de Course
 
-Le détecteur de courses de Go n'est pas conçu pour vérifier les algorithmes lock-free. Il suit les primitives de synchronisation explicites (mutex, canaux) mais ne peut pas observer les relations happens-before établies par l'ordonnancement mémoire atomique.
-
-Les tests utilisent deux mécanismes de protection :
-- Balise de compilation `//go:build !race` exclut les fichiers d'exemple des tests de course
-- Vérification à l'exécution `if lfq.RaceEnabled { t.Skip() }` ignore les tests concurrents dans `lockfree_test.go`
-
-Exécutez `go test -race ./...` pour les tests sûrs, ou `go test ./...` pour tous les tests.
+Le détecteur de courses de Go ne voit pas toutes les opérations de synchronisation écrites en assembleur dans `atomix`. Exécutez `go test -race ./...` pour les tests instrumentés. Exécutez `go test ./...` pour inclure les tests concurrents et les exemples ignorés lorsque le détecteur est activé.
 
 ## Dépendances
 
@@ -420,12 +416,10 @@ Exécutez `go test -race ./...` pour les tests sûrs, ou `go test ./...` pour to
 
 | Plateforme | Statut |
 |------------|--------|
-| linux/amd64 | Principal |
-| linux/arm64 | Supporté |
-| linux/riscv64 | Supporté |
-| linux/loong64 | Supporté |
-| darwin/amd64, darwin/arm64 | Supporté |
-| freebsd/amd64, freebsd/arm64 | Supporté |
+| linux/amd64, linux/arm64 (LSE2) | Production sous Linux 6.18+ |
+| linux/riscv64, linux/loong64 | Compilation croisée en CI |
+| darwin/amd64, darwin/arm64 | Développement. La CI exécute les tests sur darwin/arm64. |
+| freebsd/amd64, freebsd/arm64 | Développement |
 
 ## Références
 

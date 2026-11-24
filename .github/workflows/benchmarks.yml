@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-latest, macos-latest]
+        runner: [ubuntu-latest, ubuntu-26.04-arm]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 5
     steps:
@@ -24,6 +24,8 @@ jobs:
           persist-credentials: false
 
       - name: Install Atomix Go 1.27.x
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: make install-compiler check-compiler COMPILER_DIR="$RUNNER_TEMP/go-atomix"
 
       - name: Run session queue benchmarks
