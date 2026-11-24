@@ -166,8 +166,9 @@ type ConsumerPtr interface {
 // FAA-based queues (MPMC, SPMC, MPSC) implement this interface.
 // SPSC queues do not implement Drainer as they have no threshold mechanism.
 //
-// Call Drain after all producers have finished to allow consumers to
-// drain remaining items without threshold blocking.
+// For a batch in a new queue, wait for every producer's final Enqueue to
+// return, then call Drain. A single consumer makes the first Dequeue call
+// after Drain and continues until [ErrWouldBlock].
 //
 // The FAA SPMC queues and generic FAA MPMC queue skip their dequeue
 // threshold after Drain. MPMCIndirect and MPMCPtr can always drain
@@ -179,12 +180,8 @@ type ConsumerPtr interface {
 //	if d, ok := q.(lfq.Drainer); ok {
 //	    d.Drain()
 //	}
-//	// Consumers can now dequeue with the threshold disabled.
+//	// Drain the batch in this goroutine.
 type Drainer interface {
-	// Drain signals that no more enqueues will occur.
-	// Consumers may continue dequeuing until the queue is empty.
-	//
-	// Drain is a hint — the caller must ensure no further Enqueue calls
-	// will be made after calling Drain.
+	// Drain is a shutdown hint. All producers must finish before the call.
 	Drain()
 }

@@ -305,8 +305,9 @@
 // The generic FAA MPMC queue and the FAA SPMC queues use a dequeue threshold.
 // MPMCIndirect and MPMCPtr can always drain published values.
 //
-// For graceful shutdown scenarios where producers have finished but consumers
-// need to drain remaining items, use the [Drainer] interface:
+// To drain a batch from a new queue, wait for every producer's final Enqueue
+// to return. Call [Drainer.Drain] if supported, then let one consumer make
+// the first Dequeue call and continue until [ErrWouldBlock].
 //
 //	// Producer goroutines finish
 //	prodWg.Wait()
@@ -316,7 +317,7 @@
 //	    d.Drain()
 //	}
 //
-//	// Consumers can now dequeue with the threshold disabled.
+//	// Drain the batch in this goroutine.
 //
 // Drain disables the dequeue threshold on queues that use one. The caller
 // must ensure no further Enqueue calls will be made.

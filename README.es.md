@@ -324,7 +324,7 @@ return false
 
 ### Apagado Elegante
 
-Las colas MPMC genéricas y SPMC basadas en FAA usan un umbral de extracción. `Drain` desactiva ese umbral cuando termina la producción. `MPMCIndirect` y `MPMCPtr` permiten extraer todos los valores publicados en cualquier momento.
+Para vaciar un lote en una cola recién inicializada, espere a que termine la última llamada a `Enqueue()` de cada productor. Llame a `Drain()` si la cola lo admite. Un único consumidor hace entonces la primera llamada a `Dequeue()` y sigue extrayendo elementos hasta recibir `ErrWouldBlock`.
 
 ```go
 // Las goroutines productoras terminan
@@ -345,7 +345,7 @@ for {
 }
 ```
 
-`Drain()` es una pista — el llamador debe asegurar que no se harán más llamadas a `Enqueue()`. En las colas con un umbral de extracción, `Drain()` evita la salida temprana por umbral en `Dequeue`. Para MPSC, `Drain()` es solo una señal de apagado. Las colas SPSC no implementan `Drainer`; la aserción de tipo maneja este caso naturalmente.
+En las variantes basadas en FAA, `Drain()` desactiva el umbral de extracción de la cola MPMC genérica y de las colas SPMC. En las variantes MPSC basadas en FAA señala el fin de la producción. En `MPMCIndirect` y `MPMCPtr`, llamar a `Drain()` no tiene efecto. Las colas SPSC se vacían directamente.
 
 ## Cuándo Usar Cada Cola
 

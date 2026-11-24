@@ -65,9 +65,7 @@ func (q *SPMCIndirect) Init(capacity int) {
 	}
 }
 
-// Drain signals that no more enqueues will occur.
-// After Drain is called, Dequeue skips the threshold check to allow
-// consumers to drain all remaining items without producer pressure.
+// Drain disables the dequeue threshold after the producer finishes. See [Drainer].
 func (q *SPMCIndirect) Drain() {
 	q.draining.StoreRelease(true)
 }
@@ -221,9 +219,7 @@ func (q *SPMCPtr) Init(capacity int) {
 	}
 }
 
-// Drain signals that no more enqueues will occur.
-// After Drain is called, Dequeue skips the threshold check to allow
-// consumers to drain all remaining items without producer pressure.
+// Drain disables the dequeue threshold after the producer finishes. See [Drainer].
 func (q *SPMCPtr) Drain() {
 	q.draining.StoreRelease(true)
 }
