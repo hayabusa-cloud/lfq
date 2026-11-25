@@ -17,7 +17,7 @@ Le paquet `lfq` fournit des files d'attente FIFO bornées sans verrou (lock-free
 
 `lfq` s'appuie sur la recherche fondamentale en concurrence pour surmonter les limites des mutex traditionnels et des boucles CAS (Compare-And-Swap) :
 
-- **Tampon Circulaire de Lamport (1977)** : Alimente nos chemins SPSC (Single-Producer/Single-Consumer), offrant une latence strictement $O(1)$ sans attente, sans instructions atomiques de lecture-modification-écriture coûteuses.
+- Les files SPSC utilisent le **tampon circulaire de Lamport (1977)**. Le producteur et le consommateur mettent chacun à jour leur propre indice et lisent celui de l’autre au plus une fois par insertion ou retrait.
 - **Scalable Circular Queue (SCQ, 2019)**. Les files FAA génériques reposent sur l’algorithme SCQ de Ruslan Nikolaev.
 
 ### Les Stacks d'I/O Non Bloquantes d'`iox`
@@ -88,8 +88,10 @@ La CI exécute `make bench-ci` sur des machines Linux amd64 et arm64 natives ave
 
 ### Garanties de Progrès
 
-- **Sans attente (Wait-free)**: Chaque opération se termine en étapes bornées (O(1))
-- **Sans verrou (Lock-free)**: Progrès garanti au niveau système; au moins un thread progresse
+- Un appel **sans attente (wait-free)** se termine en un nombre fini de pas d’exécution de l’appelant, même si tous les autres appelants sont suspendus.
+- Dans une file **sans verrou (lock-free)**, tant que des appelants continuent d’exécuter des opérations sur la file, au moins un appel finit par se terminer. Un appel donné peut rester en suspens indéfiniment.
+
+Un appel qui renvoie `ErrWouldBlock` s’est terminé sans transférer d’élément.
 
 ## Algorithmes
 
@@ -208,8 +210,8 @@ Pour utiliser des valeurs `uintptr` identiques avec plusieurs consommateurs, uti
 
 | Opération | Retour | Description |
 |-----------|--------|-------------|
-| `Enqueue(elem)` | `error` | Ajouter élément; retourne `ErrWouldBlock` si pleine |
-| `Dequeue()` | `(T, error)` | Retirer élément; retourne `ErrWouldBlock` si vide |
+| `Enqueue(elem)` | `error` | Renvoie `nil` si l’élément est inséré, sinon `ErrWouldBlock` |
+| `Dequeue()` | `(T, error)` | Renvoie l’élément suivant et `nil`, ou la valeur zéro et `ErrWouldBlock` |
 | `Cap()` | `int` | Capacité de la file |
 
 Avec `MPSCSeq[T]` et `MPMCSeq[T]`, `Dequeue` peut renvoyer `ErrWouldBlock` pendant qu’un producteur publie le prochain élément, même si une insertion ultérieure a déjà abouti. Avec `SPMCSeq[T]` et `MPMCSeq[T]`, `Enqueue` peut renvoyer cette erreur pendant qu’un consommateur libère le prochain emplacement, même si un retrait ultérieur a déjà abouti.

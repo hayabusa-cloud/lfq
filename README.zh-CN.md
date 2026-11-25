@@ -17,7 +17,7 @@ Go 语言的无锁和无等待 FIFO 队列实现。
 
 `lfq` 建立在经典的并发计算研究之上，提供严格有界的、无锁（Lock-free）和无等待（Wait-free）队列：
 
-- **Lamport 环形缓冲区 (1977)**：驱动我们的单生产者/单消费者 (SPSC) 路径，提供严格的 $O(1)$ 无等待延迟，无需昂贵的原子读-修改-写指令。
+- SPSC 队列使用 **Lamport 环形缓冲区（1977）**。生产者和消费者各自写入自己的游标，每次入队或出队最多读取一次对方的游标。
 - **Scalable Circular Queue（SCQ，2019）**。泛型 FAA 队列基于 Ruslan Nikolaev 的 SCQ 算法。
 
 ### `iox` 非阻塞 I/O 栈
@@ -88,8 +88,10 @@ CI 在原生 Linux amd64 和 arm64 上使用 Atomix 编译器和 `GOMAXPROCS=2` 
 
 ### 进度保证
 
-- **无等待 (Wait-free)**: 每个操作在有界步骤内完成 (O(1))
-- **无锁 (Lock-free)**: 保证系统级进度；至少一个线程能够前进
+- 即使其他调用方都暂停，**无等待**（wait-free）操作仍能由调用方在有限步内完成。
+- 在**无锁**（lock-free）队列中，只要有调用方持续执行队列操作，就一定有调用能够完成。单个调用可能一直无法完成。
+
+返回 `ErrWouldBlock` 表示本次调用已结束，没有传递元素。
 
 ## 算法
 
@@ -208,8 +210,8 @@ SPSC 变体已使用 n 个槽位的 Lamport 环形缓冲区，因此会忽略 `C
 
 | 操作 | 返回值 | 描述 |
 |------|-------|------|
-| `Enqueue(elem)` | `error` | 添加元素；队列满时返回 `ErrWouldBlock` |
-| `Dequeue()` | `(T, error)` | 移除元素；队列空时返回 `ErrWouldBlock` |
+| `Enqueue(elem)` | `error` | 入队成功时返回 `nil`，否则返回 `ErrWouldBlock` |
+| `Dequeue()` | `(T, error)` | 返回下一个元素和 `nil`，或返回零值和 `ErrWouldBlock` |
 | `Cap()` | `int` | 队列容量 |
 
 在 `MPSCSeq[T]` 和 `MPMCSeq[T]` 中，生产者尚未发布队首元素时，即使后续的入队操作已经成功，`Dequeue` 也可能返回 `ErrWouldBlock`。在 `SPMCSeq[T]` 和 `MPMCSeq[T]` 中，消费者尚未释放下一个待写入的槽位时，即使后续的出队操作已经成功，`Enqueue` 也可能返回 `ErrWouldBlock`。
