@@ -6,6 +6,7 @@ package lfq_test
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"sync"
 	"testing"
@@ -30,6 +31,8 @@ func TestIsSemantic(t *testing.T) {
 		{"nil", nil, false},
 		{"ErrWouldBlock", lfq.ErrWouldBlock, true},
 		{"iox.ErrWouldBlock", iox.ErrWouldBlock, true},
+		{"iox.ErrMore", iox.ErrMore, true},
+		{"wrapped ErrMore", fmt.Errorf("read: %w", iox.ErrMore), true},
 		{"other error", errors.New("other"), false},
 	}
 
@@ -52,6 +55,8 @@ func TestIsNonFailure(t *testing.T) {
 		{"nil", nil, true},
 		{"ErrWouldBlock", lfq.ErrWouldBlock, true},
 		{"iox.ErrWouldBlock", iox.ErrWouldBlock, true},
+		{"iox.ErrMore", iox.ErrMore, true},
+		{"wrapped ErrMore", fmt.Errorf("read: %w", iox.ErrMore), true},
 		{"other error", errors.New("failure"), false},
 	}
 

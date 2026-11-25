@@ -17,7 +17,7 @@ Package `lfq` provides lock-free and wait-free bounded FIFO queues optimized for
 
 `lfq` builds on foundational concurrency research to overcome the limitations of traditional mutexes and CAS (Compare-And-Swap) loops:
 
-- **Lamport Ring Buffer (1977)**: Powers our Single-Producer/Single-Consumer (SPSC) paths, offering strictly $O(1)$ wait-free latency without expensive atomic read-modify-write instructions.
+- SPSC queues use the **Lamport ring buffer (1977)**. Each side writes its own cursor and reads the other side’s cursor at most once per enqueue or dequeue.
 - **Scalable Circular Queue (SCQ, 2019)**. Ruslan Nikolaev’s SCQ is the basis for the generic FAA queues.
 
 ### The `iox` Non-Blocking I/O Stacks
@@ -88,8 +88,10 @@ CI runs `make bench-ci` on native Linux amd64 and arm64 with the Atomix compiler
 
 ### Progress Guarantees
 
-- **Wait-free**: Every operation completes in bounded steps
-- **Lock-free**: System-wide progress guaranteed; at least one thread makes progress
+- A **wait-free** call finishes in a finite number of its caller’s own steps, even if every other caller pauses.
+- A **lock-free** queue guarantees that some call finishes as long as callers keep taking steps in queue operations. An individual call may starve.
+
+A call that returns `ErrWouldBlock` has completed without transferring an item.
 
 ## Algorithms
 
@@ -208,21 +210,23 @@ For duplicate `uintptr` values with multiple consumers, use `NewSPMCIndirectSeq`
 
 | Operation | Returns | Description |
 |-----------|---------|-------------|
-| `Enqueue(elem)` | `error` | Add element; returns `ErrWouldBlock` if full |
-| `Dequeue()` | `(T, error)` | Remove element; returns `ErrWouldBlock` if empty |
+| `Enqueue(elem)` | `error` | `nil` on insertion, otherwise `ErrWouldBlock` |
+| `Dequeue()` | `(T, error)` | The next item and `nil`, or the zero value and `ErrWouldBlock` |
 | `Cap()` | `int` | Queue capacity |
+
+The default MPSC queues, `MPSCSeq[T]`, and `MPMCSeq[T]` can return `ErrWouldBlock` from `Dequeue` while a producer is publishing the next item, even after a later enqueue succeeds. `SPMCSeq[T]` and `MPMCSeq[T]` can return it from `Enqueue` while a consumer is releasing the next slot, even after a later dequeue succeeds.
 
 ### Error Handling
 
 ```go
 err := q.Enqueue(&item)
 if lfq.IsWouldBlock(err) {
-    // Queue is full - backpressure or retry
+    // Keep the item for a later enqueue attempt.
 }
 
 elem, err := q.Dequeue()
 if lfq.IsWouldBlock(err) {
-    // Queue is empty - wait or poll
+    // Retry the dequeue later.
 }
 ```
 

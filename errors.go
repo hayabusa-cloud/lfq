@@ -8,12 +8,14 @@ import "code.hybscloud.com/iox"
 
 // ErrWouldBlock indicates the operation cannot proceed immediately.
 //
-// For Enqueue: the queue is full (backpressure)
-// For Dequeue: the queue is empty (no data available)
+// A full queue can refuse an enqueue, and an empty queue can refuse a dequeue.
+// [MPSC.Dequeue], [MPSCIndirect.Dequeue], [MPSCPtr.Dequeue], [MPSCSeq.Dequeue],
+// and [MPMCSeq.Dequeue] can also return it while a producer is publishing the
+// next item. [SPMCSeq.Enqueue] and [MPMCSeq.Enqueue] can return it while a
+// consumer is releasing the next slot for reuse.
 //
-// ErrWouldBlock is a control flow signal, not a failure. The caller should
-// retry the operation later (with backoff or yield) rather than propagating
-// the error.
+// During live polling, ErrWouldBlock signals backpressure. An event loop can
+// retry on a later turn, and a synchronous caller can wait with [iox.Backoff].
 //
 // This is an alias for [iox.ErrWouldBlock] for ecosystem consistency.
 //
@@ -40,15 +42,13 @@ func IsWouldBlock(err error) bool {
 	return iox.IsWouldBlock(err)
 }
 
-// IsSemantic reports whether err is a control flow signal (not a failure).
-// Delegates to [iox.IsSemantic].
+// IsSemantic reports whether err matches [ErrWouldBlock] or [iox.ErrMore],
+// including wrapped errors.
 func IsSemantic(err error) bool {
 	return iox.IsSemantic(err)
 }
 
-// IsNonFailure reports whether err represents a non-failure condition.
-// Returns true for nil, ErrWouldBlock, or ErrMore.
-// Delegates to [iox.IsNonFailure].
+// IsNonFailure reports whether err is nil or [IsSemantic] reports true.
 func IsNonFailure(err error) bool {
 	return iox.IsNonFailure(err)
 }

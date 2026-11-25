@@ -103,7 +103,8 @@ func (q *MPSC[T]) Enqueue(elem *T) error {
 }
 
 // Dequeue removes and returns an element (single consumer only).
-// Returns (zero-value, ErrWouldBlock) if the queue is empty.
+// It returns the zero value and [ErrWouldBlock] if the queue is empty or
+// a producer is still publishing the next item.
 func (q *MPSC[T]) Dequeue() (T, error) {
 	head := q.head.LoadRelaxed()
 	cycle := head / q.capacity

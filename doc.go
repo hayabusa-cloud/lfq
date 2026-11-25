@@ -250,8 +250,8 @@
 //
 // # Error Handling
 //
-// Queues return [ErrWouldBlock] when operations cannot proceed. This error
-// is sourced from [code.hybscloud.com/iox] for ecosystem consistency.
+// The queues in this package return nil when an enqueue or dequeue transfers
+// an item and [ErrWouldBlock] when the attempt cannot proceed.
 //
 //	// Retry loop with backoff
 //	backoff := iox.Backoff{}
@@ -267,11 +267,11 @@
 //	    backoff.Wait()
 //	}
 //
-// For semantic error classification (delegates to iox):
+// The error helpers also recognize wrapped signals from [code.hybscloud.com/iox].
 //
-//	lfq.IsWouldBlock(err)  // true if queue full/empty
-//	lfq.IsSemantic(err)    // true if control flow signal
-//	lfq.IsNonFailure(err)  // true if nil or ErrWouldBlock
+//	lfq.IsWouldBlock(err)  // matches iox.ErrWouldBlock
+//	lfq.IsSemantic(err)    // matches iox.ErrWouldBlock or iox.ErrMore
+//	lfq.IsNonFailure(err)  // true for nil or either signal
 //
 // # Capacity and Length
 //

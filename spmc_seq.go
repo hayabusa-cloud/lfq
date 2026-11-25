@@ -60,7 +60,8 @@ func (q *SPMCSeq[T]) Init(capacity int) {
 }
 
 // Enqueue adds an element to the queue (single producer only).
-// Returns ErrWouldBlock if the queue is full.
+// It returns [ErrWouldBlock] if the queue is full or a consumer is still
+// releasing the next slot for reuse.
 func (q *SPMCSeq[T]) Enqueue(elem *T) error {
 	tail := q.tail.LoadRelaxed()
 	slot := &q.buffer[tail&q.mask]

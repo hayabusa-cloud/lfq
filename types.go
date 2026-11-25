@@ -9,7 +9,7 @@ import "unsafe"
 // Queue is the combined producer-consumer interface for a FIFO queue.
 //
 // Queue provides non-blocking Enqueue and Dequeue operations. Both operations
-// return ErrWouldBlock when they cannot proceed (queue full or empty).
+// return [ErrWouldBlock] when they cannot proceed.
 //
 // The interface intentionally excludes length because accurate counts in
 // lock-free algorithms require expensive cross-core synchronization.
@@ -43,7 +43,7 @@ type Queue[T any] interface {
 type Producer[T any] interface {
 	// Enqueue adds an element to the queue (non-blocking).
 	// The element is copied into the queue's internal buffer.
-	// Returns nil on success, ErrWouldBlock if the queue is full.
+	// Returns nil on success or [ErrWouldBlock] if the queue cannot accept elem.
 	//
 	// Thread safety depends on queue type:
 	//   - SPSC: single producer only
@@ -63,7 +63,7 @@ type Producer[T any] interface {
 type Consumer[T any] interface {
 	// Dequeue removes and returns an element from the queue (non-blocking).
 	// Returns the dequeued element on success.
-	// Returns (zero-value, ErrWouldBlock) if the queue is empty.
+	// Returns the zero value and [ErrWouldBlock] if the next item is unavailable.
 	//
 	// Thread safety depends on queue type:
 	//   - SPSC: single consumer only
@@ -102,15 +102,15 @@ type QueueIndirect interface {
 
 // ProducerIndirect enqueues uintptr values (non-blocking).
 type ProducerIndirect interface {
-	// Enqueue adds an element to the queue.
-	// Returns ErrWouldBlock immediately if the queue is full.
+	// Enqueue returns nil after adding elem to the queue. On [ErrWouldBlock],
+	// the caller may retry the same value.
 	Enqueue(elem uintptr) error
 }
 
 // ConsumerIndirect dequeues uintptr values (non-blocking).
 type ConsumerIndirect interface {
 	// Dequeue removes and returns an element from the queue.
-	// Returns (0, ErrWouldBlock) immediately if the queue is empty.
+	// Returns 0 and [ErrWouldBlock] if the next item is unavailable.
 	Dequeue() (uintptr, error)
 }
 
@@ -149,15 +149,15 @@ type QueuePtr interface {
 
 // ProducerPtr enqueues unsafe.Pointer values (non-blocking).
 type ProducerPtr interface {
-	// Enqueue adds an element to the queue.
-	// Returns ErrWouldBlock immediately if the queue is full.
+	// Enqueue returns nil on a successful handoff. On [ErrWouldBlock],
+	// the caller retains ownership of elem and may retry.
 	Enqueue(elem unsafe.Pointer) error
 }
 
 // ConsumerPtr dequeues unsafe.Pointer values (non-blocking).
 type ConsumerPtr interface {
 	// Dequeue removes and returns an element from the queue.
-	// Returns (nil, ErrWouldBlock) immediately if the queue is empty.
+	// Returns nil and [ErrWouldBlock] if the next item is unavailable.
 	Dequeue() (unsafe.Pointer, error)
 }
 

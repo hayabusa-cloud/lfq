@@ -17,7 +17,7 @@ El paquete `lfq` proporciona colas FIFO limitadas libres de bloqueos (lock-free)
 
 `lfq` se basa en investigaciones fundamentales de concurrencia para superar las limitaciones de los mutex tradicionales y los bucles CAS (Compare-And-Swap):
 
-- **Buffer Circular de Lamport (1977)**: Impulsa nuestras rutas de Productor Único/Consumidor Único (SPSC), ofreciendo una latencia estrictamente de $O(1)$ libre de esperas sin costosas instrucciones atómicas de lectura-modificación-escritura.
+- Las colas SPSC usan el **búfer circular de Lamport (1977)**. El productor y el consumidor actualizan cada uno su propio índice y leen el del otro como máximo una vez por inserción o extracción.
 - **Scalable Circular Queue (SCQ, 2019)**. El algoritmo SCQ de Ruslan Nikolaev es la base de las colas FAA genéricas.
 
 ### Los Stacks de I/O No Bloqueantes de `iox`
@@ -88,8 +88,10 @@ La CI ejecuta `make bench-ci` en máquinas Linux amd64 y arm64 nativas con el co
 
 ### Garantías de Progreso
 
-- **Sin espera (Wait-free)**: Cada operación se completa en pasos acotados (O(1))
-- **Sin bloqueo (Lock-free)**: Progreso garantizado a nivel de sistema; al menos un hilo avanza
+- Una llamada **sin espera (wait-free)** termina tras un número finito de pasos propios, aunque todos los demás participantes se detengan.
+- En una cola **sin bloqueo (lock-free)**, mientras se sigan ejecutando pasos de las operaciones de la cola, alguna llamada terminará. Una llamada concreta puede quedar pendiente indefinidamente.
+
+Una llamada que devuelve `ErrWouldBlock` ha terminado sin transferir ningún elemento.
 
 ## Algoritmos
 
@@ -208,21 +210,23 @@ Para usar valores `uintptr` repetidos con varios consumidores, use `NewSPMCIndir
 
 | Operación | Retorna | Descripción |
 |-----------|---------|-------------|
-| `Enqueue(elem)` | `error` | Añadir elemento; retorna `ErrWouldBlock` si está llena |
-| `Dequeue()` | `(T, error)` | Eliminar elemento; retorna `ErrWouldBlock` si está vacía |
+| `Enqueue(elem)` | `error` | Devuelve `nil` si se inserta el elemento o `ErrWouldBlock` en caso contrario |
+| `Dequeue()` | `(T, error)` | Devuelve el siguiente elemento y `nil`, o el valor cero y `ErrWouldBlock` |
 | `Cap()` | `int` | Capacidad de la cola |
+
+En las colas MPSC predeterminadas, en `MPSCSeq[T]` y en `MPMCSeq[T]`, `Dequeue` puede devolver `ErrWouldBlock` mientras un productor publica el siguiente elemento, aunque otro productor ya haya insertado un elemento posterior. En `SPMCSeq[T]` y `MPMCSeq[T]`, `Enqueue` puede devolverlo mientras un consumidor libera la siguiente posición, aunque otro consumidor ya haya retirado un elemento posterior.
 
 ### Manejo de Errores
 
 ```go
 err := q.Enqueue(&item)
 if lfq.IsWouldBlock(err) {
-    // Cola llena - aplicar contrapresión o reintentar
+    // Conservar el elemento para volver a intentar la inserción.
 }
 
 elem, err := q.Dequeue()
 if lfq.IsWouldBlock(err) {
-    // Cola vacía - esperar o sondear
+    // Volver a intentar la extracción más tarde.
 }
 ```
 

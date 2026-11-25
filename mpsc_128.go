@@ -107,7 +107,8 @@ func (q *MPSCIndirect) Enqueue(elem uintptr) error {
 }
 
 // Dequeue removes and returns an element (single consumer only).
-// Returns (0, ErrWouldBlock) if the queue is empty.
+// It returns 0 and [ErrWouldBlock] if the queue is empty or a producer
+// is still publishing the next item.
 func (q *MPSCIndirect) Dequeue() (uintptr, error) {
 	head := q.head.LoadRelaxed()
 	cycle := head / q.capacity
@@ -220,7 +221,8 @@ func (q *MPSCPtr) Enqueue(elem unsafe.Pointer) error {
 }
 
 // Dequeue removes and returns an element (single consumer only).
-// Returns (nil, ErrWouldBlock) if the queue is empty.
+// It returns nil and [ErrWouldBlock] if the queue is empty or a producer
+// is still publishing the next item.
 func (q *MPSCPtr) Dequeue() (unsafe.Pointer, error) {
 	head := q.head.LoadRelaxed()
 	cycle := head / q.capacity
