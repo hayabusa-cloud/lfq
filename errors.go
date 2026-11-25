@@ -42,15 +42,13 @@ func IsWouldBlock(err error) bool {
 	return iox.IsWouldBlock(err)
 }
 
-// IsSemantic reports whether err is a control flow signal (not a failure).
-// Delegates to [iox.IsSemantic].
+// IsSemantic reports whether err matches [ErrWouldBlock] or [iox.ErrMore],
+// including wrapped errors.
 func IsSemantic(err error) bool {
 	return iox.IsSemantic(err)
 }
 
-// IsNonFailure reports whether err represents a non-failure condition.
-// Returns true for nil, ErrWouldBlock, or ErrMore.
-// Delegates to [iox.IsNonFailure].
+// IsNonFailure reports whether err is nil or [IsSemantic] reports true.
 func IsNonFailure(err error) bool {
 	return iox.IsNonFailure(err)
 }
