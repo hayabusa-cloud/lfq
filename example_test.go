@@ -349,41 +349,38 @@ func Example_bufferPool() {
 	// Released buffer 1, free: 4
 }
 
-// Example_backpressure demonstrates handling backpressure with a full queue.
+// Example_backpressure retries the same item after a consumer makes room.
 func Example_backpressure() {
-	// Small queue to demonstrate backpressure
-	q := lfq.NewSPSC[int](3) // Cap()=4 with new semantics
+	q := lfq.NewSPSC[int](4)
+	for v := 1; v <= q.Cap(); v++ {
+		q.Enqueue(&v)
+	}
 
-	// Fill the queue
-	filled := 0
-	for i := 1; i <= 10; i++ {
-		err := q.Enqueue(new(i))
-		if err == nil {
-			filled++
-		} else if lfq.IsWouldBlock(err) {
-			fmt.Printf("Backpressure at item %d (queue full)\n", i)
-			break
+	pending := 5
+	if err := q.Enqueue(&pending); lfq.IsWouldBlock(err) {
+		fmt.Printf("Backpressure at item %d (queue full)\n", pending)
+		first, _ := q.Dequeue()
+		fmt.Println("Drained:", first)
+		if err := q.Enqueue(&pending); err != nil {
+			return
 		}
 	}
-	fmt.Printf("Filled %d items\n", filled)
 
-	// Drain some items to make room
-	for range 2 {
-		v, _ := q.Dequeue()
-		fmt.Printf("Drained: %d\n", v)
-	}
-
-	// Now we can enqueue more
-	if q.Enqueue(new(100)) == nil {
-		fmt.Println("Enqueued 100 after draining")
+	for {
+		v, err := q.Dequeue()
+		if err != nil {
+			break
+		}
+		fmt.Println("Drained:", v)
 	}
 
 	// Output:
 	// Backpressure at item 5 (queue full)
-	// Filled 4 items
 	// Drained: 1
 	// Drained: 2
-	// Enqueued 100 after draining
+	// Drained: 3
+	// Drained: 4
+	// Drained: 5
 }
 
 // Example_batchProcessing demonstrates collecting items into batches.

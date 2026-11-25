@@ -102,8 +102,8 @@ type QueueIndirect interface {
 
 // ProducerIndirect enqueues uintptr values (non-blocking).
 type ProducerIndirect interface {
-	// Enqueue adds an element to the queue.
-	// Returns ErrWouldBlock immediately if the queue is full.
+	// Enqueue returns nil after adding elem to the queue. On [ErrWouldBlock],
+	// the caller may retry the same value.
 	Enqueue(elem uintptr) error
 }
 
@@ -149,8 +149,8 @@ type QueuePtr interface {
 
 // ProducerPtr enqueues unsafe.Pointer values (non-blocking).
 type ProducerPtr interface {
-	// Enqueue adds an element to the queue.
-	// Returns ErrWouldBlock immediately if the queue is full.
+	// Enqueue returns nil on a successful handoff. On [ErrWouldBlock],
+	// the caller retains ownership of elem and may retry.
 	Enqueue(elem unsafe.Pointer) error
 }
 
