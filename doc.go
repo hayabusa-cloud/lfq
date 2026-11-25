@@ -269,7 +269,7 @@
 //
 // For semantic error classification (delegates to iox):
 //
-//	lfq.IsWouldBlock(err)  // true if queue full/empty
+//	lfq.IsWouldBlock(err)  // true if the operation would block
 //	lfq.IsSemantic(err)    // true if control flow signal
 //	lfq.IsNonFailure(err)  // true if nil or ErrWouldBlock
 //

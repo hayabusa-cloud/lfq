@@ -9,7 +9,7 @@ import "unsafe"
 // Queue is the combined producer-consumer interface for a FIFO queue.
 //
 // Queue provides non-blocking Enqueue and Dequeue operations. Both operations
-// return ErrWouldBlock when they cannot proceed (queue full or empty).
+// return [ErrWouldBlock] when they cannot proceed.
 //
 // The interface intentionally excludes length because accurate counts in
 // lock-free algorithms require expensive cross-core synchronization.
@@ -43,7 +43,7 @@ type Queue[T any] interface {
 type Producer[T any] interface {
 	// Enqueue adds an element to the queue (non-blocking).
 	// The element is copied into the queue's internal buffer.
-	// Returns nil on success, ErrWouldBlock if the queue is full.
+	// Returns nil on success or [ErrWouldBlock] if the queue cannot accept elem.
 	//
 	// Thread safety depends on queue type:
 	//   - SPSC: single producer only
@@ -63,7 +63,7 @@ type Producer[T any] interface {
 type Consumer[T any] interface {
 	// Dequeue removes and returns an element from the queue (non-blocking).
 	// Returns the dequeued element on success.
-	// Returns (zero-value, ErrWouldBlock) if the queue is empty.
+	// Returns the zero value and [ErrWouldBlock] if the next item is unavailable.
 	//
 	// Thread safety depends on queue type:
 	//   - SPSC: single consumer only

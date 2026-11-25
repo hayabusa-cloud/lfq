@@ -212,17 +212,19 @@ Para usar valores `uintptr` repetidos con varios consumidores, use `NewSPMCIndir
 | `Dequeue()` | `(T, error)` | Eliminar elemento; retorna `ErrWouldBlock` si está vacía |
 | `Cap()` | `int` | Capacidad de la cola |
 
+En `MPSCSeq[T]` y `MPMCSeq[T]`, `Dequeue` puede devolver `ErrWouldBlock` mientras un productor publica el siguiente elemento, aunque otro productor ya haya insertado un elemento posterior. En `SPMCSeq[T]` y `MPMCSeq[T]`, `Enqueue` puede devolverlo mientras un consumidor libera la siguiente posición, aunque otro consumidor ya haya retirado un elemento posterior.
+
 ### Manejo de Errores
 
 ```go
 err := q.Enqueue(&item)
 if lfq.IsWouldBlock(err) {
-    // Cola llena - aplicar contrapresión o reintentar
+    // Conservar el elemento para volver a intentar la inserción.
 }
 
 elem, err := q.Dequeue()
 if lfq.IsWouldBlock(err) {
-    // Cola vacía - esperar o sondear
+    // Volver a intentar la extracción más tarde.
 }
 ```
 

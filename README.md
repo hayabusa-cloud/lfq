@@ -212,17 +212,19 @@ For duplicate `uintptr` values with multiple consumers, use `NewSPMCIndirectSeq`
 | `Dequeue()` | `(T, error)` | Remove element; returns `ErrWouldBlock` if empty |
 | `Cap()` | `int` | Queue capacity |
 
+`MPSCSeq[T]` and `MPMCSeq[T]` can return `ErrWouldBlock` from `Dequeue` while a producer is publishing the next item, even after a later enqueue succeeds. `SPMCSeq[T]` and `MPMCSeq[T]` can return it from `Enqueue` while a consumer is releasing the next slot, even after a later dequeue succeeds.
+
 ### Error Handling
 
 ```go
 err := q.Enqueue(&item)
 if lfq.IsWouldBlock(err) {
-    // Queue is full - backpressure or retry
+    // Keep the item for a later enqueue attempt.
 }
 
 elem, err := q.Dequeue()
 if lfq.IsWouldBlock(err) {
-    // Queue is empty - wait or poll
+    // Retry the dequeue later.
 }
 ```
 

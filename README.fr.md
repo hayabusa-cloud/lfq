@@ -212,17 +212,19 @@ Pour utiliser des valeurs `uintptr` identiques avec plusieurs consommateurs, uti
 | `Dequeue()` | `(T, error)` | Retirer élément; retourne `ErrWouldBlock` si vide |
 | `Cap()` | `int` | Capacité de la file |
 
+Avec `MPSCSeq[T]` et `MPMCSeq[T]`, `Dequeue` peut renvoyer `ErrWouldBlock` pendant qu’un producteur publie le prochain élément, même si une insertion ultérieure a déjà abouti. Avec `SPMCSeq[T]` et `MPMCSeq[T]`, `Enqueue` peut renvoyer cette erreur pendant qu’un consommateur libère le prochain emplacement, même si un retrait ultérieur a déjà abouti.
+
 ### Gestion des Erreurs
 
 ```go
 err := q.Enqueue(&item)
 if lfq.IsWouldBlock(err) {
-    // File pleine - appliquer la contre-pression ou réessayer
+    // Conserver l’élément pour réessayer l’insertion plus tard.
 }
 
 elem, err := q.Dequeue()
 if lfq.IsWouldBlock(err) {
-    // File vide - attendre ou sonder
+    // Réessayer le retrait plus tard.
 }
 ```
 

@@ -63,7 +63,8 @@ func (q *MPMCSeq[T]) Init(capacity int) {
 }
 
 // Enqueue adds an element to the queue.
-// Returns ErrWouldBlock if the queue is full.
+// It returns [ErrWouldBlock] if the queue is full or a consumer is still
+// releasing the next slot for reuse.
 func (q *MPMCSeq[T]) Enqueue(elem *T) error {
 	sw := spin.Wait{}
 	for {
@@ -86,7 +87,8 @@ func (q *MPMCSeq[T]) Enqueue(elem *T) error {
 }
 
 // Dequeue removes and returns an element from the queue.
-// Returns (zero-value, ErrWouldBlock) if the queue is empty.
+// It returns the zero value and [ErrWouldBlock] if the queue is empty or
+// a producer is still publishing the next item.
 func (q *MPMCSeq[T]) Dequeue() (T, error) {
 	sw := spin.Wait{}
 	for {

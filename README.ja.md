@@ -212,17 +212,19 @@ SPSC はすでに n スロットの Lamport リングバッファを使うため
 | `Dequeue()` | `(T, error)` | 要素を削除；空の場合は `ErrWouldBlock` を返す |
 | `Cap()` | `int` | キュー容量 |
 
+`MPSCSeq[T]` と `MPMCSeq[T]` では、プロデューサーが先頭の要素をまだ公開していなければ、後続のエンキューが完了していても `Dequeue` が `ErrWouldBlock` を返すことがあります。`SPMCSeq[T]` と `MPMCSeq[T]` では、コンシューマーが次の書き込み先のスロットをまだ解放していなければ、後続のデキューが完了していても `Enqueue` が `ErrWouldBlock` を返すことがあります。
+
 ### エラー処理
 
 ```go
 err := q.Enqueue(&item)
 if lfq.IsWouldBlock(err) {
-    // キューが満杯 - バックプレッシャーまたはリトライ
+    // 要素を保持して、後でエンキューを再試行する。
 }
 
 elem, err := q.Dequeue()
 if lfq.IsWouldBlock(err) {
-    // キューが空 - 待機またはポーリング
+    // 後でデキューを再試行する。
 }
 ```
 
