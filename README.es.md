@@ -214,7 +214,7 @@ Para usar valores `uintptr` repetidos con varios consumidores, use `NewSPMCIndir
 | `Dequeue()` | `(T, error)` | Devuelve el siguiente elemento y `nil`, o el valor cero y `ErrWouldBlock` |
 | `Cap()` | `int` | Capacidad de la cola |
 
-En `MPSCSeq[T]` y `MPMCSeq[T]`, `Dequeue` puede devolver `ErrWouldBlock` mientras un productor publica el siguiente elemento, aunque otro productor ya haya insertado un elemento posterior. En `SPMCSeq[T]` y `MPMCSeq[T]`, `Enqueue` puede devolverlo mientras un consumidor libera la siguiente posición, aunque otro consumidor ya haya retirado un elemento posterior.
+En las colas MPSC predeterminadas, en `MPSCSeq[T]` y en `MPMCSeq[T]`, `Dequeue` puede devolver `ErrWouldBlock` mientras un productor publica el siguiente elemento, aunque otro productor ya haya insertado un elemento posterior. En `SPMCSeq[T]` y `MPMCSeq[T]`, `Enqueue` puede devolverlo mientras un consumidor libera la siguiente posición, aunque otro consumidor ya haya retirado un elemento posterior.
 
 ### Manejo de Errores
 

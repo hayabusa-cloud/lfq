@@ -214,7 +214,7 @@ Pour utiliser des valeurs `uintptr` identiques avec plusieurs consommateurs, uti
 | `Dequeue()` | `(T, error)` | Renvoie l’élément suivant et `nil`, ou la valeur zéro et `ErrWouldBlock` |
 | `Cap()` | `int` | Capacité de la file |
 
-Avec `MPSCSeq[T]` et `MPMCSeq[T]`, `Dequeue` peut renvoyer `ErrWouldBlock` pendant qu’un producteur publie le prochain élément, même si une insertion ultérieure a déjà abouti. Avec `SPMCSeq[T]` et `MPMCSeq[T]`, `Enqueue` peut renvoyer cette erreur pendant qu’un consommateur libère le prochain emplacement, même si un retrait ultérieur a déjà abouti.
+Dans les files MPSC par défaut comme dans `MPSCSeq[T]` et `MPMCSeq[T]`, `Dequeue` peut renvoyer `ErrWouldBlock` pendant qu’un producteur publie le prochain élément, même si une insertion ultérieure a déjà abouti. Avec `SPMCSeq[T]` et `MPMCSeq[T]`, `Enqueue` peut renvoyer cette erreur pendant qu’un consommateur libère le prochain emplacement, même si un retrait ultérieur a déjà abouti.
 
 ### Gestion des Erreurs
 

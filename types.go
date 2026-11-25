@@ -110,7 +110,7 @@ type ProducerIndirect interface {
 // ConsumerIndirect dequeues uintptr values (non-blocking).
 type ConsumerIndirect interface {
 	// Dequeue removes and returns an element from the queue.
-	// Returns (0, ErrWouldBlock) immediately if the queue is empty.
+	// Returns 0 and [ErrWouldBlock] if the next item is unavailable.
 	Dequeue() (uintptr, error)
 }
 
@@ -157,7 +157,7 @@ type ProducerPtr interface {
 // ConsumerPtr dequeues unsafe.Pointer values (non-blocking).
 type ConsumerPtr interface {
 	// Dequeue removes and returns an element from the queue.
-	// Returns (nil, ErrWouldBlock) immediately if the queue is empty.
+	// Returns nil and [ErrWouldBlock] if the next item is unavailable.
 	Dequeue() (unsafe.Pointer, error)
 }
 

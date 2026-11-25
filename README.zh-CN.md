@@ -214,7 +214,7 @@ SPSC 变体已使用 n 个槽位的 Lamport 环形缓冲区，因此会忽略 `C
 | `Dequeue()` | `(T, error)` | 返回下一个元素和 `nil`，或返回零值和 `ErrWouldBlock` |
 | `Cap()` | `int` | 队列容量 |
 
-在 `MPSCSeq[T]` 和 `MPMCSeq[T]` 中，生产者尚未发布队首元素时，即使后续的入队操作已经成功，`Dequeue` 也可能返回 `ErrWouldBlock`。在 `SPMCSeq[T]` 和 `MPMCSeq[T]` 中，消费者尚未释放下一个待写入的槽位时，即使后续的出队操作已经成功，`Enqueue` 也可能返回 `ErrWouldBlock`。
+在默认的 MPSC 队列、`MPSCSeq[T]` 和 `MPMCSeq[T]` 中，生产者尚未发布队首元素时，即使后续的入队操作已经成功，`Dequeue` 也可能返回 `ErrWouldBlock`。在 `SPMCSeq[T]` 和 `MPMCSeq[T]` 中，消费者尚未释放下一个待写入的槽位时，即使后续的出队操作已经成功，`Enqueue` 也可能返回 `ErrWouldBlock`。
 
 ### 错误处理
 

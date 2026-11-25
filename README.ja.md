@@ -214,7 +214,7 @@ SPSC はすでに n スロットの Lamport リングバッファを使うため
 | `Dequeue()` | `(T, error)` | 次の要素と `nil`、またはゼロ値と `ErrWouldBlock` を返す |
 | `Cap()` | `int` | キュー容量 |
 
-`MPSCSeq[T]` と `MPMCSeq[T]` では、プロデューサーが先頭の要素をまだ公開していなければ、後続のエンキューが完了していても `Dequeue` が `ErrWouldBlock` を返すことがあります。`SPMCSeq[T]` と `MPMCSeq[T]` では、コンシューマーが次の書き込み先のスロットをまだ解放していなければ、後続のデキューが完了していても `Enqueue` が `ErrWouldBlock` を返すことがあります。
+既定の MPSC キュー、`MPSCSeq[T]`、`MPMCSeq[T]` では、プロデューサーが先頭の要素をまだ公開していなければ、後続のエンキューが完了していても `Dequeue` が `ErrWouldBlock` を返すことがあります。`SPMCSeq[T]` と `MPMCSeq[T]` では、コンシューマーが次の書き込み先のスロットをまだ解放していなければ、後続のデキューが完了していても `Enqueue` が `ErrWouldBlock` を返すことがあります。
 
 ### エラー処理
 

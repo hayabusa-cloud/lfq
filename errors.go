@@ -9,9 +9,10 @@ import "code.hybscloud.com/iox"
 // ErrWouldBlock indicates the operation cannot proceed immediately.
 //
 // A full queue can refuse an enqueue, and an empty queue can refuse a dequeue.
-// [MPSCSeq.Dequeue] and [MPMCSeq.Dequeue] can also return ErrWouldBlock while
-// a producer is publishing the next item. [SPMCSeq.Enqueue] and [MPMCSeq.Enqueue]
-// can return it while a consumer is releasing the next slot for reuse.
+// [MPSC.Dequeue], [MPSCIndirect.Dequeue], [MPSCPtr.Dequeue], [MPSCSeq.Dequeue],
+// and [MPMCSeq.Dequeue] can also return it while a producer is publishing the
+// next item. [SPMCSeq.Enqueue] and [MPMCSeq.Enqueue] can return it while a
+// consumer is releasing the next slot for reuse.
 //
 // During live polling, ErrWouldBlock signals backpressure. An event loop can
 // retry on a later turn, and a synchronous caller can wait with [iox.Backoff].
