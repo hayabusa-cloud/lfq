@@ -149,28 +149,26 @@
 //
 // Worker Pool (MPMC):
 //
-//	// Multiple submitters → Multiple workers
-//	q := lfq.NewMPMCSeq[Job](4096)
+// Start the workers once for the life of the service. Submitters share the
+// returned function and can retry the same job after [ErrWouldBlock].
 //
-//	// Workers
-//	for range numWorkers {
-//	    go func() {
-//	        var backoff iox.Backoff
-//	        for {
-//	            job, err := q.Dequeue()
-//	            if err != nil {
-//	                backoff.Wait()
-//	                continue
-//	            }
-//	            backoff.Reset()
-//	            job.Run()
-//	        }
-//	    }()
-//	}
-//
-//	// Submit jobs from anywhere
-//	func Submit(j Job) error {
-//	    return q.Enqueue(&j)
+//	func startWorkers(numWorkers int) func(Job) error {
+//		q := lfq.NewMPMCSeq[Job](4096)
+//		for range numWorkers {
+//			go func() {
+//				var backoff iox.Backoff
+//				for {
+//					job, err := q.Dequeue()
+//					if err != nil {
+//						backoff.Wait()
+//						continue
+//					}
+//					backoff.Reset()
+//					job.Run()
+//				}
+//			}()
+//		}
+//		return func(job Job) error { return q.Enqueue(&job) }
 //	}
 //
 // # Queue Variants
