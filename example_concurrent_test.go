@@ -82,13 +82,11 @@ func Example_workerPool() {
 
 // Example_pipeline demonstrates a multi-stage pipeline using SPSC queues.
 func Example_pipeline() {
-	// Pipeline: Generate → Double → Print
+	// Generate → Double → Collect
 	stage1to2 := lfq.NewSPSC[int](8) // Generate → Double
-	stage2to3 := lfq.NewSPSC[int](8) // Double → Print
+	stage2to3 := lfq.NewSPSC[int](8) // Double → Collect
 
 	var wg sync.WaitGroup
-	results := make([]int, 0, 5)
-	var mu sync.Mutex
 
 	// Stage 1: Generate numbers 1-5
 	wg.Add(1)
@@ -127,7 +125,8 @@ func Example_pipeline() {
 		}
 	}()
 
-	// Stage 3: Collect results
+	// Stage 3 collects the results. The caller reads them after wg.Wait returns.
+	results := make([]int, 0, 5)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -139,9 +138,7 @@ func Example_pipeline() {
 				continue
 			}
 			backoff.Reset()
-			mu.Lock()
 			results = append(results, v)
-			mu.Unlock()
 		}
 	}()
 
