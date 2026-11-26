@@ -2,7 +2,7 @@
 // Use of this source code is governed by a MIT-style
 // license that can be found in the LICENSE file.
 
-//go:build amd64
+//go:build amd64 || arm64
 
 package asm_test
 
@@ -42,25 +42,24 @@ func TestSPSCIndirectLayout(t *testing.T) {
 
 func TestSPSCEnqueueDequeueAsm(t *testing.T) {
 	q := lfq.NewSPSCIndirect(8)
-	qptr := uintptr(unsafe.Pointer(q))
 
 	// Test enqueue
 	for i := range 8 {
-		ret := asm.SPSCEnqueue(qptr, uintptr(i))
+		ret := asm.SPSCEnqueue(uintptr(unsafe.Pointer(q)), uintptr(i))
 		if ret != 0 {
 			t.Fatalf("Enqueue(%d): got %d, want 0", i, ret)
 		}
 	}
 
 	// Queue should be full
-	ret := asm.SPSCEnqueue(qptr, 99)
+	ret := asm.SPSCEnqueue(uintptr(unsafe.Pointer(q)), 99)
 	if ret != 1 {
 		t.Fatalf("Enqueue on full: got %d, want 1", ret)
 	}
 
 	// Test dequeue
 	for i := range 8 {
-		elem, err := asm.SPSCDequeue(qptr)
+		elem, err := asm.SPSCDequeue(uintptr(unsafe.Pointer(q)))
 		if err != 0 {
 			t.Fatalf("Dequeue: got err %d, want 0", err)
 		}
@@ -70,7 +69,7 @@ func TestSPSCEnqueueDequeueAsm(t *testing.T) {
 	}
 
 	// Queue should be empty
-	_, err := asm.SPSCDequeue(qptr)
+	_, err := asm.SPSCDequeue(uintptr(unsafe.Pointer(q)))
 	if err != 1 {
 		t.Fatalf("Dequeue on empty: got err %d, want 1", err)
 	}
@@ -78,14 +77,13 @@ func TestSPSCEnqueueDequeueAsm(t *testing.T) {
 
 func TestSPSCWraparoundAsm(t *testing.T) {
 	q := lfq.NewSPSCIndirect(4)
-	qptr := uintptr(unsafe.Pointer(q))
 
 	// Multiple rounds of fill/drain
 	for round := range 100 {
 		// Fill
 		for i := range 4 {
 			v := uintptr(round*100 + i)
-			ret := asm.SPSCEnqueue(qptr, v)
+			ret := asm.SPSCEnqueue(uintptr(unsafe.Pointer(q)), v)
 			if ret != 0 {
 				t.Fatalf("round %d: Enqueue(%d): got %d", round, i, ret)
 			}
@@ -93,7 +91,7 @@ func TestSPSCWraparoundAsm(t *testing.T) {
 
 		// Drain
 		for i := range 4 {
-			elem, err := asm.SPSCDequeue(qptr)
+			elem, err := asm.SPSCDequeue(uintptr(unsafe.Pointer(q)))
 			if err != 0 {
 				t.Fatalf("round %d: Dequeue: got err %d", round, err)
 			}
@@ -106,67 +104,61 @@ func TestSPSCWraparoundAsm(t *testing.T) {
 }
 
 func TestSPSCAsmMatchesGo(t *testing.T) {
-	// Verify assembly produces same results as Go implementation
-	qAsm := lfq.NewSPSCIndirect(16)
-	qGo := lfq.NewSPSCIndirect(16)
-	qAsmPtr := uintptr(unsafe.Pointer(qAsm))
+	const capacity = 16
+	indirect := lfq.NewSPSCIndirect(capacity)
+	typed := lfq.NewSPSC[uintptr](capacity)
 
-	// Interleaved enqueue/dequeue pattern
+	checkDequeue := func() {
+		t.Helper()
+		got, gotErr := indirect.Dequeue()
+		want, wantErr := typed.Dequeue()
+		if got != want || gotErr != wantErr {
+			t.Fatalf("Dequeue() = (%d, %v), want (%d, %v)", got, gotErr, want, wantErr)
+		}
+	}
 	for i := range 1000 {
 		v := uintptr(i)
-
-		// Enqueue to both
-		retAsm := asm.SPSCEnqueue(qAsmPtr, v)
-		errGo := qGo.Enqueue(v)
-
-		if (retAsm == 0) != (errGo == nil) {
-			t.Fatalf("Enqueue mismatch at %d: asm=%d, go=%v", i, retAsm, errGo)
+		if got, want := indirect.Enqueue(v), typed.Enqueue(&v); got != want {
+			t.Fatalf("Enqueue(%d) = %v, want %v", v, got, want)
 		}
-
-		// Dequeue from both every 3rd iteration
 		if i%3 == 0 {
-			elemAsm, errAsm := asm.SPSCDequeue(qAsmPtr)
-			elemGo, errGoDeq := qGo.Dequeue()
-
-			if (errAsm == 0) != (errGoDeq == nil) {
-				t.Fatalf("Dequeue err mismatch at %d: asm=%d, go=%v", i, errAsm, errGoDeq)
-			}
-			if errAsm == 0 && elemAsm != elemGo {
-				t.Fatalf("Dequeue elem mismatch at %d: asm=%d, go=%d", i, elemAsm, elemGo)
-			}
+			checkDequeue()
 		}
+	}
+	// Drain any remaining values and check the empty result.
+	for range capacity + 1 {
+		checkDequeue()
 	}
 }
 
-// Benchmark comparison: Assembly vs Go implementation
+// Compare the public typed Go and indirect assembly queues with uintptr payloads.
+// The enqueue benchmarks include the cost of draining each full batch.
 
-func BenchmarkSPSCIndirectGoEnqueueDequeue(b *testing.B) {
-	q := lfq.NewSPSCIndirect(1024)
+func BenchmarkSPSCTypedGoEnqueueDequeue(b *testing.B) {
+	q := lfq.NewSPSC[uintptr](1024)
 
-	b.ResetTimer()
-	for i := range b.N {
-		q.Enqueue(uintptr(i))
+	for i := 0; b.Loop(); i++ {
+		v := uintptr(i)
+		q.Enqueue(&v)
 		q.Dequeue()
 	}
 }
 
 func BenchmarkSPSCIndirectAsmEnqueueDequeue(b *testing.B) {
 	q := lfq.NewSPSCIndirect(1024)
-	qptr := uintptr(unsafe.Pointer(q))
 
-	b.ResetTimer()
-	for i := range b.N {
-		asm.SPSCEnqueue(qptr, uintptr(i))
-		asm.SPSCDequeue(qptr)
+	for i := 0; b.Loop(); i++ {
+		q.Enqueue(uintptr(i))
+		q.Dequeue()
 	}
 }
 
-func BenchmarkSPSCIndirectGoEnqueue(b *testing.B) {
-	q := lfq.NewSPSCIndirect(1024)
+func BenchmarkSPSCTypedGoEnqueue(b *testing.B) {
+	q := lfq.NewSPSC[uintptr](1024)
 
-	b.ResetTimer()
-	for i := range b.N {
-		q.Enqueue(uintptr(i))
+	for i := 0; b.Loop(); i++ {
+		v := uintptr(i)
+		q.Enqueue(&v)
 		if i%1024 == 1023 {
 			// Drain to avoid full
 			for range 1024 {
@@ -178,15 +170,13 @@ func BenchmarkSPSCIndirectGoEnqueue(b *testing.B) {
 
 func BenchmarkSPSCIndirectAsmEnqueue(b *testing.B) {
 	q := lfq.NewSPSCIndirect(1024)
-	qptr := uintptr(unsafe.Pointer(q))
 
-	b.ResetTimer()
-	for i := range b.N {
-		asm.SPSCEnqueue(qptr, uintptr(i))
+	for i := 0; b.Loop(); i++ {
+		q.Enqueue(uintptr(i))
 		if i%1024 == 1023 {
 			// Drain to avoid full
 			for range 1024 {
-				asm.SPSCDequeue(qptr)
+				q.Dequeue()
 			}
 		}
 	}
