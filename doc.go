@@ -37,22 +37,21 @@
 //
 // # Basic Usage
 //
-// All queues share the same interface for enqueueing and dequeueing:
+// A typed [Queue] takes a *T on enqueue and copies the value on success.
+// [QueueIndirect] takes a uintptr handle and [QueuePtr] takes an unsafe.Pointer.
 //
-//	// Create a queue
-//	q := lfq.NewSPSC[int](1024)
+//	index := uintptr(42)
+//	typed := lfq.NewSPSC[uintptr](2)
+//	fmt.Println(typed.Enqueue(&index)) // <nil>
+//	index = 7
+//	fmt.Println(typed.Dequeue()) // 42 <nil>
 //
-//	// Enqueue (non-blocking)
-//	err := q.Enqueue(new(42))
-//	if lfq.IsWouldBlock(err) {
-//	    // Queue is full - handle backpressure
-//	}
+//	handles := lfq.NewSPSCIndirect(2)
+//	fmt.Println(handles.Enqueue(index)) // <nil>
+//	fmt.Println(handles.Dequeue())      // 7 <nil>
 //
-//	// Dequeue (non-blocking)
-//	elem, err := q.Dequeue()
-//	if lfq.IsWouldBlock(err) {
-//	    // Queue is empty - try again later
-//	}
+//	_, err := handles.Dequeue()
+//	fmt.Println(lfq.IsWouldBlock(err)) // true
 //
 // # Common Patterns
 //
@@ -150,28 +149,26 @@
 //
 // Worker Pool (MPMC):
 //
-//	// Multiple submitters → Multiple workers
-//	q := lfq.NewMPMCSeq[Job](4096)
+// Start the workers once for the life of the service. Submitters share the
+// returned function and can retry the same job after [ErrWouldBlock].
 //
-//	// Workers
-//	for range numWorkers {
-//	    go func() {
-//	        var backoff iox.Backoff
-//	        for {
-//	            job, err := q.Dequeue()
-//	            if err != nil {
-//	                backoff.Wait()
-//	                continue
-//	            }
-//	            backoff.Reset()
-//	            job.Run()
-//	        }
-//	    }()
-//	}
-//
-//	// Submit jobs from anywhere
-//	func Submit(j Job) error {
-//	    return q.Enqueue(&j)
+//	func startWorkers(numWorkers int) func(Job) error {
+//		q := lfq.NewMPMCSeq[Job](4096)
+//		for range numWorkers {
+//			go func() {
+//				var backoff iox.Backoff
+//				for {
+//					job, err := q.Dequeue()
+//					if err != nil {
+//						backoff.Wait()
+//						continue
+//					}
+//					backoff.Reset()
+//					job.Run()
+//				}
+//			}()
+//		}
+//		return func(job Job) error { return q.Enqueue(&job) }
 //	}
 //
 // # Queue Variants

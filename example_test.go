@@ -47,6 +47,25 @@ func ExampleNewSPSC() {
 	// 50
 }
 
+func ExampleProducer_slice() {
+	q := lfq.NewSPSC[[]byte](2)
+	buf := []byte("go")
+	msg := buf
+	fmt.Println(q.Enqueue(&msg))
+
+	msg = msg[:1]
+	received, err := q.Dequeue()
+	fmt.Println(string(msg), string(received), err)
+
+	copy(received, "G") // The consumer writes to the shared backing array.
+	fmt.Println(string(buf))
+
+	// Output:
+	// <nil>
+	// g go <nil>
+	// Go
+}
+
 // ExampleNewMPMC drains a batch after all producers finish.
 func ExampleNewMPMC() {
 	q := lfq.NewMPMC[string](16)
@@ -175,33 +194,31 @@ func ExampleNewMPMCPtr() {
 	// Message 2: world
 }
 
-// ExampleIsWouldBlock demonstrates error handling patterns.
+// ExampleIsWouldBlock shows how to retry a refused enqueue after a consumer makes room.
 func ExampleIsWouldBlock() {
-	q := lfq.NewSPSC[int](2) // Cap()=2
-
-	// Fill the queue
+	q := lfq.NewSPSC[int](2)
 	q.Enqueue(new(1))
 	q.Enqueue(new(2))
 
-	// Queue is full
-	err := q.Enqueue(new(5))
-	if lfq.IsWouldBlock(err) {
-		fmt.Println("Queue full - applying backpressure")
-	}
+	pending := 3
+	fmt.Println(lfq.IsWouldBlock(q.Enqueue(&pending))) // true
+	fmt.Println(q.Dequeue())                           // 1 <nil>
+	fmt.Println(q.Enqueue(&pending))                   // <nil>
 
-	// Drain the queue
-	q.Dequeue()
-	q.Dequeue()
-
-	// Queue is empty
-	_, err = q.Dequeue()
-	if lfq.IsWouldBlock(err) {
-		fmt.Println("Queue empty - no data available")
+	for {
+		item, err := q.Dequeue()
+		if lfq.IsWouldBlock(err) {
+			break
+		}
+		fmt.Println(item)
 	}
 
 	// Output:
-	// Queue full - applying backpressure
-	// Queue empty - no data available
+	// true
+	// 1 <nil>
+	// <nil>
+	// 2
+	// 3
 }
 
 // ExampleMPSC_eventAggregation demonstrates using MPSC for event aggregation.

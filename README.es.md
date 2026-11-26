@@ -77,6 +77,12 @@ La CI ejecuta `make bench-ci` en máquinas Linux amd64 y arm64 nativas con el co
 
 `FullRetry` mide en una sola goroutine un intento fallido de insertar en una cola llena, una extracción y un nuevo intento de inserción que tiene éxito. Ejecuta `make bench-session` para medir los casos de sesión o `make bench` para ejecutar todos los benchmarks.
 
+En amd64 y arm64, estas pruebas comparan `SPSC[uintptr]` (Go) y `SPSCIndirect` (ensamblador) en una sola goroutine. `EnqueueDequeue` mide una inserción seguida de una extracción. `EnqueueWithBatchDrain` da el tiempo por inserción e incluye el coste de vaciar la cola cada 1024 inserciones. La cola tipada pone la posición a cero al extraer el valor. La cola indirecta conserva el valor hasta que reutiliza esa posición.
+
+```bash
+make bench-ci BENCH_PATTERN='^BenchmarkSPSC(TypedGo|IndirectAsm)'
+```
+
 ## Tipos de Cola
 
 | Tipo | Patrón | Garantía de Progreso | Caso de Uso |
@@ -97,16 +103,20 @@ Una llamada que devuelve `ErrWouldBlock` ha terminado sin transferir ningún ele
 
 ### SPSC: Buffer Circular de Lamport
 
-Buffer acotado clásico con optimización de índices en caché.
+Solo el productor avanza el índice de escritura y solo el consumidor avanza el de lectura. Cada uno actualiza su copia del índice del otro como máximo una vez por llamada. La inserción y la extracción son operaciones sin espera y requieren O(1) pasos.
 
 ```go
 q := lfq.NewSPSC[int](1024)
 
 // Productor
-q.Enqueue(&value)  // Sin espera O(1)
+value := 42
+fmt.Println(q.Enqueue(&value)) // <nil>
 
 // Consumidor
-elem, err := q.Dequeue()  // Sin espera O(1)
+fmt.Println(q.Dequeue()) // 42 <nil>
+
+elem, err := q.Dequeue()
+fmt.Println(elem, lfq.IsWouldBlock(err)) // 0 true
 ```
 
 ### MPSC/SPMC/MPMC: Basado en FAA (Predeterminado)
@@ -218,15 +228,24 @@ En las colas MPSC predeterminadas, en `MPSCSeq[T]` y en `MPMCSeq[T]`, `Dequeue` 
 
 ### Manejo de Errores
 
-```go
-err := q.Enqueue(&item)
-if lfq.IsWouldBlock(err) {
-    // Conservar el elemento para volver a intentar la inserción.
-}
+La cola SPSC está llena cuando el productor intenta insertar `3`. El productor conserva el valor y vuelve a intentarlo cuando el consumidor retira `1`. El consumidor recibe después `2` y `3`, en ese orden.
 
-elem, err := q.Dequeue()
-if lfq.IsWouldBlock(err) {
-    // Volver a intentar la extracción más tarde.
+```go
+q := lfq.NewSPSC[int](2)
+q.Enqueue(new(1))
+q.Enqueue(new(2))
+
+pending := 3
+fmt.Println(lfq.IsWouldBlock(q.Enqueue(&pending))) // true
+fmt.Println(q.Dequeue())                           // 1 <nil>
+fmt.Println(q.Enqueue(&pending))                   // <nil>
+
+for {
+	item, err := q.Dequeue()
+	if lfq.IsWouldBlock(err) {
+		break
+	}
+	fmt.Println(item)
 }
 ```
 
