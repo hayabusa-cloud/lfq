@@ -76,12 +76,11 @@ func (b *Builder) SingleConsumer() *Builder {
 	return b
 }
 
-// Compact selects CAS-based algorithms with n physical slots instead of
-// FAA-based algorithms with 2n slots.
+// Compact selects a CAS-based ring for MPSC, SPMC, and MPMC queues.
+// For rounded capacity n, these queues use n slots in compact mode and
+// 2n slots in the default FAA ring. The bytes per slot depend on the queue type.
 //
-// Trade-off: Half memory usage, reduced scalability under high contention.
-//
-// SPSC already uses n slots (Lamport ring buffer) and ignores Compact().
+// SPSC always uses its n-slot Lamport ring.
 func (b *Builder) Compact() *Builder {
 	b.opts.compact = true
 	return b
@@ -96,14 +95,11 @@ func (b *Builder) Compact() *Builder {
 //	SingleConsumer only             → MPSC (FAA default, CAS if Compact)
 //	Neither                         → MPMC (FAA default, CAS if Compact)
 //
-// Default: FAA-based algorithms with 2n physical slots (better scalability).
-// Compact(): CAS-based algorithms with n slots (half memory footprint).
+// See [Builder.Compact] for physical slot counts.
 //
-// For type-safe returns with concrete types, use:
-//   - BuildSPSC[T](b) → *SPSC[T]
-//   - BuildMPSC[T](b) → *MPSC[T] (or *MPSCSeq[T] if Compact)
-//   - BuildSPMC[T](b) → *SPMC[T] (or *SPMCSeq[T] if Compact)
-//   - BuildMPMC[T](b) → *MPMC[T] (or *MPMCSeq[T] if Compact)
+// [BuildSPSC] returns *SPSC[T]. [BuildMPSC], [BuildSPMC], and [BuildMPMC]
+// return Queue[T]. Use a direct constructor such as [NewMPSC] when you need
+// the concrete type.
 func Build[T any](b *Builder) Queue[T] {
 	switch {
 	case b.opts.singleProducer && b.opts.singleConsumer:
@@ -253,9 +249,6 @@ func (b *Builder) BuildIndirectMPMC() QueueIndirect {
 // Algorithm selection:
 //  1. SPSC (SingleProducer + SingleConsumer) → Lamport ring buffer
 //  2. Other configurations → FAA default (2n slots), CAS if Compact (n slots)
-//
-// Default: FAA-based algorithms with 2n physical slots (better scalability).
-// Compact(): CAS-based algorithms with n slots (half memory footprint).
 func (b *Builder) BuildPtr() QueuePtr {
 	switch {
 	case b.opts.singleProducer && b.opts.singleConsumer:
