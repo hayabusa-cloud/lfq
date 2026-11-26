@@ -228,15 +228,24 @@ SPSC 变体已使用 n 个槽位的 Lamport 环形缓冲区，因此会忽略 `C
 
 ### 错误处理
 
-```go
-err := q.Enqueue(&item)
-if lfq.IsWouldBlock(err) {
-    // 保留该元素，稍后重试入队。
-}
+SPSC 队列已满时，生产者保留未能入队的 `3`。消费者取出 `1` 后，生产者重试入队，消费者随后依次取出 `2` 和 `3`。
 
-elem, err := q.Dequeue()
-if lfq.IsWouldBlock(err) {
-    // 稍后重试出队。
+```go
+q := lfq.NewSPSC[int](2)
+q.Enqueue(new(1))
+q.Enqueue(new(2))
+
+pending := 3
+fmt.Println(lfq.IsWouldBlock(q.Enqueue(&pending))) // true
+fmt.Println(q.Dequeue())                           // 1 <nil>
+fmt.Println(q.Enqueue(&pending))                   // <nil>
+
+for {
+	item, err := q.Dequeue()
+	if lfq.IsWouldBlock(err) {
+		break
+	}
+	fmt.Println(item)
 }
 ```
 

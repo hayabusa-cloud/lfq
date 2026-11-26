@@ -228,15 +228,24 @@ SPSC はすでに n スロットの Lamport リングバッファを使うため
 
 ### エラー処理
 
-```go
-err := q.Enqueue(&item)
-if lfq.IsWouldBlock(err) {
-    // 要素を保持して、後でエンキューを再試行する。
-}
+SPSC キューが満杯で `3` を追加できないとき、プロデューサーはその値を保持します。コンシューマーが `1` を取り出した後でプロデューサーが再試行すると、コンシューマーは `2`、`3` の順に受け取ります。
 
-elem, err := q.Dequeue()
-if lfq.IsWouldBlock(err) {
-    // 後でデキューを再試行する。
+```go
+q := lfq.NewSPSC[int](2)
+q.Enqueue(new(1))
+q.Enqueue(new(2))
+
+pending := 3
+fmt.Println(lfq.IsWouldBlock(q.Enqueue(&pending))) // true
+fmt.Println(q.Dequeue())                           // 1 <nil>
+fmt.Println(q.Enqueue(&pending))                   // <nil>
+
+for {
+	item, err := q.Dequeue()
+	if lfq.IsWouldBlock(err) {
+		break
+	}
+	fmt.Println(item)
 }
 ```
 

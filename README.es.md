@@ -228,15 +228,24 @@ En las colas MPSC predeterminadas, en `MPSCSeq[T]` y en `MPMCSeq[T]`, `Dequeue` 
 
 ### Manejo de Errores
 
-```go
-err := q.Enqueue(&item)
-if lfq.IsWouldBlock(err) {
-    // Conservar el elemento para volver a intentar la inserción.
-}
+La cola SPSC está llena cuando el productor intenta insertar `3`. El productor conserva el valor y vuelve a intentarlo cuando el consumidor retira `1`. El consumidor recibe después `2` y `3`, en ese orden.
 
-elem, err := q.Dequeue()
-if lfq.IsWouldBlock(err) {
-    // Volver a intentar la extracción más tarde.
+```go
+q := lfq.NewSPSC[int](2)
+q.Enqueue(new(1))
+q.Enqueue(new(2))
+
+pending := 3
+fmt.Println(lfq.IsWouldBlock(q.Enqueue(&pending))) // true
+fmt.Println(q.Dequeue())                           // 1 <nil>
+fmt.Println(q.Enqueue(&pending))                   // <nil>
+
+for {
+	item, err := q.Dequeue()
+	if lfq.IsWouldBlock(err) {
+		break
+	}
+	fmt.Println(item)
 }
 ```
 

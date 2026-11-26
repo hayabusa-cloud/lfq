@@ -228,15 +228,24 @@ The default MPSC queues, `MPSCSeq[T]`, and `MPMCSeq[T]` can return `ErrWouldBloc
 
 ### Error Handling
 
-```go
-err := q.Enqueue(&item)
-if lfq.IsWouldBlock(err) {
-    // Keep the item for a later enqueue attempt.
-}
+The full SPSC queue refuses `3`. The producer keeps it and retries after the consumer takes `1`. The consumer then receives `2` and `3` in order.
 
-elem, err := q.Dequeue()
-if lfq.IsWouldBlock(err) {
-    // Retry the dequeue later.
+```go
+q := lfq.NewSPSC[int](2)
+q.Enqueue(new(1))
+q.Enqueue(new(2))
+
+pending := 3
+fmt.Println(lfq.IsWouldBlock(q.Enqueue(&pending))) // true
+fmt.Println(q.Dequeue())                           // 1 <nil>
+fmt.Println(q.Enqueue(&pending))                   // <nil>
+
+for {
+	item, err := q.Dequeue()
+	if lfq.IsWouldBlock(err) {
+		break
+	}
+	fmt.Println(item)
 }
 ```
 

@@ -228,15 +228,24 @@ Dans les files MPSC par défaut comme dans `MPSCSeq[T]` et `MPMCSeq[T]`, `Dequeu
 
 ### Gestion des Erreurs
 
-```go
-err := q.Enqueue(&item)
-if lfq.IsWouldBlock(err) {
-    // Conserver l’élément pour réessayer l’insertion plus tard.
-}
+La file SPSC est pleine lorsque le producteur tente d’y insérer `3`. Il conserve cette valeur et réessaie une fois que le consommateur a retiré `1`. Le consommateur reçoit ensuite `2`, puis `3`.
 
-elem, err := q.Dequeue()
-if lfq.IsWouldBlock(err) {
-    // Réessayer le retrait plus tard.
+```go
+q := lfq.NewSPSC[int](2)
+q.Enqueue(new(1))
+q.Enqueue(new(2))
+
+pending := 3
+fmt.Println(lfq.IsWouldBlock(q.Enqueue(&pending))) // true
+fmt.Println(q.Dequeue())                           // 1 <nil>
+fmt.Println(q.Enqueue(&pending))                   // <nil>
+
+for {
+	item, err := q.Dequeue()
+	if lfq.IsWouldBlock(err) {
+		break
+	}
+	fmt.Println(item)
 }
 ```
 
