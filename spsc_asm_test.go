@@ -41,7 +41,7 @@ func TestSPSCAsmMatchesGo(t *testing.T) {
 }
 
 // Compare the public typed Go and indirect assembly queues with uintptr payloads.
-// The enqueue benchmarks include the cost of draining each full batch.
+// EnqueueWithBatchDrain reports time per enqueue, including a drain every 1024 enqueues.
 
 func BenchmarkSPSCTypedGoEnqueueDequeue(b *testing.B) {
 	q := lfq.NewSPSC[uintptr](1024)
@@ -62,7 +62,7 @@ func BenchmarkSPSCIndirectAsmEnqueueDequeue(b *testing.B) {
 	}
 }
 
-func BenchmarkSPSCTypedGoEnqueue(b *testing.B) {
+func BenchmarkSPSCTypedGoEnqueueWithBatchDrain(b *testing.B) {
 	q := lfq.NewSPSC[uintptr](1024)
 
 	for i := 0; b.Loop(); i++ {
@@ -77,7 +77,7 @@ func BenchmarkSPSCTypedGoEnqueue(b *testing.B) {
 	}
 }
 
-func BenchmarkSPSCIndirectAsmEnqueue(b *testing.B) {
+func BenchmarkSPSCIndirectAsmEnqueueWithBatchDrain(b *testing.B) {
 	q := lfq.NewSPSCIndirect(1024)
 
 	for i := 0; b.Loop(); i++ {
