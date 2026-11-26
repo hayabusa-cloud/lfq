@@ -35,15 +35,14 @@ type Queue[T any] interface {
 	Cap() int
 }
 
-// Producer is the interface for enqueueing elements.
-//
-// Producer provides non-blocking enqueue operations. The element is passed
-// by pointer to avoid copying large structs. The queue stores a copy of
-// the pointed-to value, so the original can be modified after Enqueue returns.
+// Producer enqueues values without blocking.
 type Producer[T any] interface {
-	// Enqueue adds an element to the queue (non-blocking).
-	// The element is copied into the queue's internal buffer.
-	// Returns nil on success or [ErrWouldBlock] if the queue cannot accept elem.
+	// Enqueue copies *elem into the queue by assignment. It returns nil on
+	// success or [ErrWouldBlock] if the queue cannot accept the value.
+	//
+	// After a successful enqueue, the producer can reassign its slice
+	// variable. The queued slice shares its backing array. The producer can
+	// overwrite those elements once the consumer has finished with them.
 	//
 	// Thread safety depends on queue type:
 	//   - SPSC: single producer only

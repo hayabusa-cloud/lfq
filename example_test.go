@@ -47,6 +47,25 @@ func ExampleNewSPSC() {
 	// 50
 }
 
+func ExampleProducer_slice() {
+	q := lfq.NewSPSC[[]byte](2)
+	buf := []byte("go")
+	msg := buf
+	fmt.Println(q.Enqueue(&msg))
+
+	msg = msg[:1]
+	received, err := q.Dequeue()
+	fmt.Println(string(msg), string(received), err)
+
+	copy(received, "G") // The consumer writes to the shared backing array.
+	fmt.Println(string(buf))
+
+	// Output:
+	// <nil>
+	// g go <nil>
+	// Go
+}
+
 // ExampleNewMPMC drains a batch after all producers finish.
 func ExampleNewMPMC() {
 	q := lfq.NewMPMC[string](16)
