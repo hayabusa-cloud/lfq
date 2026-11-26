@@ -77,6 +77,12 @@ La CI exécute `make bench-ci` sur des machines Linux amd64 et arm64 natives ave
 
 `FullRetry` mesure dans une seule goroutine une tentative d’insertion dans une file pleine, le retrait d’une valeur et la réussite d’une nouvelle tentative d’insertion. Exécutez `make bench-session` pour les cas de session ou `make bench` pour tous les benchmarks.
 
+Sur amd64 et arm64, ces benchmarks comparent `SPSC[uintptr]` (Go) et `SPSCIndirect` (assembleur) dans une seule goroutine. `EnqueueDequeue` mesure une insertion suivie d’un retrait. `EnqueueWithBatchDrain` donne le temps par insertion, en incluant le coût du vidage de la file toutes les 1 024 insertions. La file typée remet la case à zéro au retrait. La file indirecte conserve la valeur jusqu’à la réutilisation de la case.
+
+```bash
+make bench-ci BENCH_PATTERN='^BenchmarkSPSC(TypedGo|IndirectAsm)'
+```
+
 ## Types de Files
 
 | Type | Modèle | Garantie de Progrès | Cas d'Utilisation |
@@ -97,16 +103,20 @@ Un appel qui renvoie `ErrWouldBlock` s’est terminé sans transférer d’élé
 
 ### SPSC: Buffer Circulaire de Lamport
 
-Buffer borné classique avec optimisation d'index en cache.
+Seul le producteur avance l’indice d’écriture et seul le consommateur avance l’indice de lecture. Chacun rafraîchit sa copie de l’autre indice au plus une fois par appel. L’insertion et le retrait s’effectuent sans attente en O(1) étapes.
 
 ```go
 q := lfq.NewSPSC[int](1024)
 
 // Producteur
-q.Enqueue(&value)  // Sans attente O(1)
+value := 42
+fmt.Println(q.Enqueue(&value)) // <nil>
 
 // Consommateur
-elem, err := q.Dequeue()  // Sans attente O(1)
+fmt.Println(q.Dequeue()) // 42 <nil>
+
+elem, err := q.Dequeue()
+fmt.Println(elem, lfq.IsWouldBlock(err)) // 0 true
 ```
 
 ### MPSC/SPMC/MPMC: Basé sur FAA (Par Défaut)

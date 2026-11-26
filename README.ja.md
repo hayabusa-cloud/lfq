@@ -77,6 +77,12 @@ CI では Linux の amd64 と arm64 の実機で、Atomix コンパイラと `GO
 
 `FullRetry` は、満杯のキューへの挿入が失敗し、値を 1 個取り出してから挿入に成功するまでを単一の goroutine で測定します。セッションに関する測定には `make bench-session`、すべてのベンチマークには `make bench` を使います。
 
+amd64 と arm64 では、次のベンチマークで `SPSC[uintptr]`（Go）と `SPSCIndirect`（アセンブリ）を単一の goroutine で比較できます。`EnqueueDequeue` は enqueue と直後の dequeue の合計時間を測ります。`EnqueueWithBatchDrain` は、1,024 回の enqueue ごとにキューを空にする時間を含めて、enqueue 1 回あたりの時間を示します。型付きキューは dequeue 時にスロットをゼロに戻し、間接キューはそのスロットを再利用するまで値を保持します。
+
+```bash
+make bench-ci BENCH_PATTERN='^BenchmarkSPSC(TypedGo|IndirectAsm)'
+```
+
 ## キュータイプ
 
 | タイプ | パターン | 進行保証 | ユースケース |
@@ -97,16 +103,20 @@ CI では Linux の amd64 と arm64 の実機で、Atomix コンパイラと `GO
 
 ### SPSC: Lamport リングバッファ
 
-キャッシュインデックス最適化を備えた古典的な有界バッファ。
+書き込み位置はプロデューサーだけが、読み取り位置はコンシューマーだけが進めます。各呼び出しで相手側の位置を読み直してキャッシュを更新するのは最大 1 回です。エンキューもデキューもウェイトフリーで、O(1) ステップで完了します。
 
 ```go
 q := lfq.NewSPSC[int](1024)
 
 // プロデューサー
-q.Enqueue(&value)  // ウェイトフリー O(1)
+value := 42
+fmt.Println(q.Enqueue(&value)) // <nil>
 
 // コンシューマー
-elem, err := q.Dequeue()  // ウェイトフリー O(1)
+fmt.Println(q.Dequeue()) // 42 <nil>
+
+elem, err := q.Dequeue()
+fmt.Println(elem, lfq.IsWouldBlock(err)) // 0 true
 ```
 
 ### MPSC/SPMC/MPMC: FAA ベース（デフォルト）

@@ -77,6 +77,12 @@ CI 在原生 Linux amd64 和 arm64 上使用 Atomix 编译器和 `GOMAXPROCS=2` 
 
 `FullRetry` 在单个 goroutine 中测量向已满队列入队失败、出队一个值并成功重试入队的过程。运行 `make bench-session` 可执行会话基准测试，运行 `make bench` 可执行全部基准测试。
 
+在 amd64 和 arm64 上，以下基准测试在同一个 goroutine 中比较 `SPSC[uintptr]`（Go）和 `SPSCIndirect`（汇编）。`EnqueueDequeue` 测量一次入队紧接一次出队的总耗时。`EnqueueWithBatchDrain` 给出每次入队的平均耗时，其中包括每入队 1024 次后排空队列的时间。类型化队列在出队时将槽位置零。间接队列会保留槽中的值，直到复用该槽位。
+
+```bash
+make bench-ci BENCH_PATTERN='^BenchmarkSPSC(TypedGo|IndirectAsm)'
+```
+
 ## 队列类型
 
 | 类型 | 模式 | 进度保证 | 使用场景 |
@@ -97,16 +103,20 @@ CI 在原生 Linux amd64 和 arm64 上使用 Atomix 编译器和 `GOMAXPROCS=2` 
 
 ### SPSC: Lamport 环形缓冲区
 
-经典有界缓冲区，带缓存索引优化。
+只有生产者推进队尾，只有消费者推进队头。双方都缓存对方的游标，每次调用最多刷新一次。入队和出队都是无等待操作，在 O(1) 步内完成。
 
 ```go
 q := lfq.NewSPSC[int](1024)
 
 // 生产者
-q.Enqueue(&value)  // 无等待 O(1)
+value := 42
+fmt.Println(q.Enqueue(&value)) // <nil>
 
 // 消费者
-elem, err := q.Dequeue()  // 无等待 O(1)
+fmt.Println(q.Dequeue()) // 42 <nil>
+
+elem, err := q.Dequeue()
+fmt.Println(elem, lfq.IsWouldBlock(err)) // 0 true
 ```
 
 ### MPSC/SPMC/MPMC: 基于 FAA（默认）

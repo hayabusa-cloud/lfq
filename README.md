@@ -77,6 +77,12 @@ CI runs `make bench-ci` on native Linux amd64 and arm64 with the Atomix compiler
 
 `FullRetry` measures a failed enqueue on a full queue, one dequeue, and a successful retry in a single goroutine. Run `make bench-session` for the session cases or `make bench` for the full suite.
 
+On amd64 and arm64, the following benchmarks compare `SPSC[uintptr]` (Go) and `SPSCIndirect` (assembly) in one goroutine. `EnqueueDequeue` times one enqueue followed by one dequeue. `EnqueueWithBatchDrain` reports time per enqueue, including the cost of draining the queue every 1,024 enqueues. The typed queue clears each slot on dequeue. The indirect queue leaves the word in place until the slot is reused.
+
+```bash
+make bench-ci BENCH_PATTERN='^BenchmarkSPSC(TypedGo|IndirectAsm)'
+```
+
 ## Queue Types
 
 | Type | Pattern | Progress Guarantee | Use Case |
@@ -97,16 +103,20 @@ A call that returns `ErrWouldBlock` has completed without transferring an item.
 
 ### SPSC: Lamport Ring Buffer
 
-Classic bounded buffer with cached index optimization. 
+Only the producer advances the tail and only the consumer advances the head. Each refreshes its cached copy of the other cursor at most once per call. Enqueue and dequeue are wait-free and take O(1) steps.
 
 ```go
 q := lfq.NewSPSC[int](1024)
 
 // Producer
-q.Enqueue(&value)  // Wait-free O(1)
+value := 42
+fmt.Println(q.Enqueue(&value)) // <nil>
 
 // Consumer
-elem, err := q.Dequeue()  // Wait-free O(1)
+fmt.Println(q.Dequeue()) // 42 <nil>
+
+elem, err := q.Dequeue()
+fmt.Println(elem, lfq.IsWouldBlock(err)) // 0 true
 ```
 
 ### MPSC/SPMC/MPMC: FAA-Based (Default)
