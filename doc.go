@@ -37,22 +37,21 @@
 //
 // # Basic Usage
 //
-// All queues share the same interface for enqueueing and dequeueing:
+// A typed [Queue] takes a *T on enqueue and copies the value on success.
+// [QueueIndirect] takes a uintptr handle and [QueuePtr] takes an unsafe.Pointer.
 //
-//	// Create a queue
-//	q := lfq.NewSPSC[int](1024)
+//	index := uintptr(42)
+//	typed := lfq.NewSPSC[uintptr](2)
+//	fmt.Println(typed.Enqueue(&index)) // <nil>
+//	index = 7
+//	fmt.Println(typed.Dequeue()) // 42 <nil>
 //
-//	// Enqueue (non-blocking)
-//	err := q.Enqueue(new(42))
-//	if lfq.IsWouldBlock(err) {
-//	    // Queue is full - handle backpressure
-//	}
+//	handles := lfq.NewSPSCIndirect(2)
+//	fmt.Println(handles.Enqueue(index)) // <nil>
+//	fmt.Println(handles.Dequeue())      // 7 <nil>
 //
-//	// Dequeue (non-blocking)
-//	elem, err := q.Dequeue()
-//	if lfq.IsWouldBlock(err) {
-//	    // Queue is empty - try again later
-//	}
+//	_, err := handles.Dequeue()
+//	fmt.Println(lfq.IsWouldBlock(err)) // true
 //
 // # Common Patterns
 //
